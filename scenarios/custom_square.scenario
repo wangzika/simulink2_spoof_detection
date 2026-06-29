@@ -1,0 +1,21 @@
+# f7_sim scenario file
+duration_s=42
+dt_s=0.002
+output_csv=build/custom_square.csv
+output_html=build/custom_square.html
+write_html=true
+
+# Relative paths are resolved from this scenario file's directory.
+trajectory_file=custom_square.csv
+
+attack_start_s=15
+attack_end_s=27
+attack_offset_m=3.0,-1.5,0.6
+pseudorange_delay_m=6.0
+attack_ramp_s=1.5
+glrt_false_alarm_rate=0.001
+consecutive_samples=2
+
+enable_uwb=true
+enable_optical_flow=true
+enable_magnetometer=true

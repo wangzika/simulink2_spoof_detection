@@ -1,0 +1,16 @@
+# Build outputs and generated simulation artifacts
+/build/
+/simulation.csv
+/dashboard.html
+/imgui.ini
+*.rrd
+
+# Local dependency installs
+/third_party/python_deps/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# macOS metadata
+.DS_Store
