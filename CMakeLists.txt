@@ -60,6 +60,101 @@ if (Python3_EXECUTABLE)
         COMMENT "Generate a Rerun .rrd recording from the simulation CSV"
         VERBATIM
     )
+    set(FULL_DATA_RTKLIB_POS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rtklib.pos")
+    set(FULL_DATA_DOP "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/dop.txt")
+    if (EXISTS "${FULL_DATA_RTKLIB_POS}")
+        add_custom_target(adapt_full_data
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/rtklib_dataset_adapter.py
+                --pos ${FULL_DATA_RTKLIB_POS}
+                --dop ${FULL_DATA_DOP}
+                --name full_data_rtklib
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/datasets/full_data_rtklib
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Adapt ../full_data/gnss/rtklib.pos into waypoint/scenario/replay files"
+            VERBATIM
+        )
+        add_custom_target(simulate_full_data
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/rtklib_dataset_adapter.py
+                --pos ${FULL_DATA_RTKLIB_POS}
+                --dop ${FULL_DATA_DOP}
+                --name full_data_rtklib
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/datasets/full_data_rtklib
+            COMMAND $<TARGET_FILE:f7_sim>
+                --scenario ${CMAKE_CURRENT_BINARY_DIR}/datasets/full_data_rtklib/full_data_rtklib.scenario
+            DEPENDS f7_sim
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Run f7_sim along the adapted full_data RTKLIB route"
+            VERBATIM
+        )
+    endif()
+
+    set(FAST_GLIO_LOG_DIR "$ENV{FAST_GLIO_LOG_DIR}")
+    if ("${FAST_GLIO_LOG_DIR}" STREQUAL "")
+        set(FAST_GLIO_LOG_DIR "/Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log")
+    endif()
+    set(FAST_GLIO_LOOSE "${FAST_GLIO_LOG_DIR}/gnss_loose_diag.csv")
+    set(FAST_GLIO_RAW "${FAST_GLIO_LOG_DIR}/gnss_raw_update_log.csv")
+    set(FAST_GLIO_TIGHT "${FAST_GLIO_LOG_DIR}/gnss_tight_pose.csv")
+    if (EXISTS "${FULL_DATA_RTKLIB_POS}" AND EXISTS "${FAST_GLIO_LOOSE}" AND EXISTS "${FAST_GLIO_RAW}")
+        add_custom_target(paper_dataset
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_detection_dataset.py
+                --rtklib-pos ${FULL_DATA_RTKLIB_POS}
+                --dop ${FULL_DATA_DOP}
+                --loose ${FAST_GLIO_LOOSE}
+                --raw ${FAST_GLIO_RAW}
+                --tight ${FAST_GLIO_TIGHT}
+                --name full_data_clean
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Build the clean paper detection dataset from full_data and FAST_GLIO logs"
+            VERBATIM
+        )
+        add_custom_target(paper_dataset_attack
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_detection_dataset.py
+                --rtklib-pos ${FULL_DATA_RTKLIB_POS}
+                --dop ${FULL_DATA_DOP}
+                --loose ${FAST_GLIO_LOOSE}
+                --raw ${FAST_GLIO_RAW}
+                --tight ${FAST_GLIO_TIGHT}
+                --name full_data_attack
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_attack
+                --attack-window +180:+260
+                --attack-offset 8.0,-3.0,0.5
+                --pseudorange-delay 18.0
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Build a synthetic spoofing dataset for detector evaluation"
+            VERBATIM
+        )
+        add_custom_target(paper_eval_attack
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/evaluate_detection.py
+                ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_attack/full_data_attack_detection.csv
+                --output-json ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_attack/full_data_attack_metrics.json
+                --output-md ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_attack/full_data_attack_metrics.md
+            DEPENDS paper_dataset_attack
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Evaluate the synthetic spoofing dataset"
+            VERBATIM
+        )
+        add_custom_target(paper_eval_clean
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/evaluate_detection.py
+                ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean/full_data_clean_detection.csv
+                --output-json ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean/full_data_clean_metrics.json
+                --output-md ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean/full_data_clean_metrics.md
+            DEPENDS paper_dataset
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Evaluate the clean full-data false alarm behavior"
+            VERBATIM
+        )
+        add_custom_target(paper_pipeline
+            DEPENDS paper_eval_clean paper_eval_attack
+        )
+    endif()
 else()
     message(STATUS "rerun_view disabled: Python3 interpreter was not found")
 endif()
@@ -119,4 +214,11 @@ if (BUILD_TESTING)
     add_executable(flight_sim_tests tests/test_flight_sim.cpp)
     target_link_libraries(flight_sim_tests PRIVATE flight_sim)
     add_test(NAME flight_sim_tests COMMAND flight_sim_tests)
+    if (Python3_EXECUTABLE)
+        add_test(
+            NAME paper_pipeline_smoke
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_paper_pipeline.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
 endif()

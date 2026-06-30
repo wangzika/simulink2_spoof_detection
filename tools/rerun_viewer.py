@@ -142,6 +142,16 @@ def as_bool(row: dict[str, str], key: str) -> bool:
     return as_float(row, key) != 0.0
 
 
+def has_column(rows: list[dict[str, str]], key: str) -> bool:
+    return bool(rows) and key in rows[0]
+
+
+def optional_float(row: dict[str, str], key: str, default: float = 0.0) -> float:
+    if key not in row or row[key] == "":
+        return default
+    return as_float(row, key)
+
+
 def xyz(row: dict[str, str], prefix: str) -> list[float]:
     return [
         as_float(row, f"{prefix}_x"),
@@ -250,8 +260,39 @@ def log_static_scene(rr, rows: list[dict[str, str]], csv_path: Path) -> None:
         static=True,
     )
 
+    if has_column(rows, "rtk_quality"):
+        rr.log(
+            "plots/rtk_quality",
+            rr.SeriesLines(colors=[[40, 200, 210]], names=["RTK quality"]),
+            static=True,
+        )
+    if has_column(rows, "rtk_ratio"):
+        rr.log(
+            "plots/rtk_ratio",
+            rr.SeriesLines(colors=[[150, 115, 255]], names=["RTK ambiguity ratio"]),
+            static=True,
+        )
+    if has_column(rows, "rtk_satellites"):
+        rr.log(
+            "plots/rtk_satellites",
+            rr.SeriesLines(colors=[[75, 190, 85]], names=["RTK satellites"]),
+            static=True,
+        )
+    if all(has_column(rows, key) for key in ("dop_pdop", "dop_hdop", "dop_vdop")):
+        rr.log(
+            "plots/dop",
+            rr.SeriesLines(
+                colors=[[245, 65, 65], [70, 135, 255], [255, 165, 40]],
+                names=["PDOP", "HDOP", "VDOP"],
+            ),
+            static=True,
+        )
+
     first = rows[0]
     last = rows[-1]
+    extra_plot_text = ""
+    if has_column(rows, "rtk_quality"):
+        extra_plot_text = ", RTK quality, RTK ratio, satellite count, DOP"
     summary = "\n".join(
         [
             "# F7 Flight Simulation",
@@ -260,7 +301,7 @@ def log_static_scene(rr, rows: list[dict[str, str]], csv_path: Path) -> None:
             f"- Samples: {len(rows)}",
             f"- Time span: {as_float(first, 'time_s'):.2f}s to {as_float(last, 'time_s'):.2f}s",
             "- 3D paths: true, estimate, GPS, reference, GPS attack segment, UWB points",
-            "- Time plots: residual norm, GLRT statistic, threshold, pseudorange RMS, trust state",
+            f"- Time plots: residual norm, GLRT statistic, threshold, pseudorange RMS, trust state{extra_plot_text}",
         ]
     )
     rr.log("readme", rr.TextDocument(summary, media_type="text/markdown"), static=True)
@@ -295,6 +336,23 @@ def log_dynamic_rows(rr, rows: list[dict[str, str]], stride: int) -> None:
                 ]
             ),
         )
+        if has_column(rows, "rtk_quality"):
+            rr.log("plots/rtk_quality", rr.Scalars([optional_float(row, "rtk_quality")]))
+        if has_column(rows, "rtk_ratio"):
+            rr.log("plots/rtk_ratio", rr.Scalars([optional_float(row, "rtk_ratio")]))
+        if has_column(rows, "rtk_satellites"):
+            rr.log("plots/rtk_satellites", rr.Scalars([optional_float(row, "rtk_satellites")]))
+        if all(has_column(rows, key) for key in ("dop_pdop", "dop_hdop", "dop_vdop")):
+            rr.log(
+                "plots/dop",
+                rr.Scalars(
+                    [
+                        optional_float(row, "dop_pdop"),
+                        optional_float(row, "dop_hdop"),
+                        optional_float(row, "dop_vdop"),
+                    ]
+                ),
+            )
 
         mode = row.get("flight_mode", "")
         gps_trusted = as_bool(row, "gps_trusted")

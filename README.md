@@ -116,6 +116,102 @@ Print a starter scenario template:
 ./build/f7_sim --print-scenario-template
 ```
 
+## Adapting Your Dataset
+
+For the current `../full_data/gnss` dataset, the quickest path is to use the RTKLIB output `rtklib.pos` as the measured route. The adapter converts ECEF positions to local ENU, generates a waypoint route for `f7_sim`, and also emits a replay CSV that can be opened directly in Rerun.
+
+Generate dataset artifacts:
+
+```bash
+python tools/rtklib_dataset_adapter.py \
+  --pos ../full_data/gnss/rtklib.pos \
+  --dop ../full_data/gnss/dop.txt \
+  --name full_data_rtklib \
+  --output-dir build/datasets/full_data_rtklib
+```
+
+This writes:
+
+```text
+build/datasets/full_data_rtklib/full_data_rtklib_waypoints.csv
+build/datasets/full_data_rtklib/full_data_rtklib.scenario
+build/datasets/full_data_rtklib/full_data_rtklib_replay.csv
+build/datasets/full_data_rtklib/full_data_rtklib_summary.json
+```
+
+Open the real RTK route and quality metrics in Rerun:
+
+```bash
+python tools/rerun_viewer.py build/datasets/full_data_rtklib/full_data_rtklib_replay.csv
+```
+
+Run the simulator along the adapted route:
+
+```bash
+./build/f7_sim --scenario build/datasets/full_data_rtklib/full_data_rtklib.scenario
+python tools/rerun_viewer.py build/datasets/full_data_rtklib/full_data_rtklib_sim.csv
+```
+
+The adapter defaults to a constant simulated flight altitude of `1.8 m` while preserving the measured horizontal ENU path. Use `--preserve-altitude` if you want the simulated z coordinate to follow the RTK local up component instead.
+
+Useful CMake shortcuts are enabled when `../full_data/gnss/rtklib.pos` exists:
+
+```bash
+cmake --build build --target adapt_full_data
+cmake --build build --target simulate_full_data
+```
+
+To test synthetic spoofing on your measured route, pass attack options to the adapter:
+
+```bash
+python tools/rtklib_dataset_adapter.py \
+  --pos ../full_data/gnss/rtklib.pos \
+  --dop ../full_data/gnss/dop.txt \
+  --name full_data_attack \
+  --output-dir build/datasets/full_data_attack \
+  --attack-start 180 \
+  --attack-end 260 \
+  --attack-offset 4.0,-2.0,0.8
+./build/f7_sim --scenario build/datasets/full_data_attack/full_data_attack.scenario
+```
+
+## Paper Platform
+
+The repository now includes the first reproducible layer for a GNSS spoof-detection paper platform:
+
+- `tools/build_detection_dataset.py` merges RTKLIB `.pos`/DOP data with FAST_GLIO loose/raw/tight GNSS logs.
+- `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
+- `tools/smoke_paper_pipeline.py` is a self-contained CTest smoke test for clean and synthetic-attack cases.
+- `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
+- `docs/paper_draft.md` contains the initial paper draft skeleton.
+
+Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO logs are present:
+
+```bash
+cmake --build build --target paper_pipeline
+```
+
+Individual targets are also available: `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, and `paper_eval_attack`.
+
+Or run the tools directly:
+
+```bash
+python tools/build_detection_dataset.py \
+  --rtklib-pos ../full_data/gnss/rtklib.pos \
+  --dop ../full_data/gnss/dop.txt \
+  --loose /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_loose_diag.csv \
+  --raw /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_raw_update_log.csv \
+  --tight /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_tight_pose.csv \
+  --name full_data_attack \
+  --output-dir build/paper_platform/full_data_attack \
+  --attack-window +180:+260 \
+  --attack-offset 8.0,-3.0,0.5 \
+  --pseudorange-delay 18.0
+
+python tools/evaluate_detection.py \
+  build/paper_platform/full_data_attack/full_data_attack_detection.csv
+```
+
 ## ImGui Desktop UI
 
 The project includes an optional Dear ImGui desktop dashboard executable, `f7_imgui`. It reads the generated CSV and shows playback controls, flight status, GPS trust/rejection state, trajectory replay, UWB auxiliary points, and residual/GLRT plots.
