@@ -87,7 +87,11 @@ cmake --build build --target paper_dataset_attack
 cmake --build build --target paper_eval_attack
 cmake --build build --target paper_eval_clean
 cmake --build build --target paper_pipeline
+cmake --build build --target paper_figures
+cmake --build build --target paper_pdf
 ```
+
+LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编译结果在 `paper/build/main.pdf`。
 
 ## Phase 2: 原始 GNSS 观测层
 

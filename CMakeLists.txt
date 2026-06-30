@@ -33,6 +33,7 @@ add_executable(f7_sim src/main.cpp)
 target_link_libraries(f7_sim PRIVATE flight_sim)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+find_program(LATEXMK_EXECUTABLE latexmk)
 if (Python3_EXECUTABLE)
     add_custom_target(rerun_view
         COMMAND $<TARGET_FILE:f7_sim>
@@ -177,6 +178,32 @@ if (Python3_EXECUTABLE)
         add_custom_target(paper_pipeline
             DEPENDS paper_eval_clean paper_eval_attack
         )
+        add_custom_target(paper_figures
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_paper_figures.py
+                --output-dir ${CMAKE_CURRENT_SOURCE_DIR}/paper/figures
+                --metrics-tex ${CMAKE_CURRENT_SOURCE_DIR}/paper/generated_metrics.tex
+            DEPENDS paper_pipeline
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Generate LaTeX paper figures from experiment outputs"
+            VERBATIM
+        )
+        if (LATEXMK_EXECUTABLE)
+            add_custom_target(paper_pdf
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/paper/build
+                COMMAND ${CMAKE_COMMAND} -E env LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 ${LATEXMK_EXECUTABLE}
+                    -g
+                    -pdf
+                    -interaction=nonstopmode
+                    -halt-on-error
+                    -outdir=${CMAKE_CURRENT_SOURCE_DIR}/paper/build
+                    main.tex
+                DEPENDS paper_figures
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/paper
+                COMMENT "Build the LaTeX paper PDF"
+                VERBATIM
+            )
+        endif()
     endif()
 else()
     message(STATUS "rerun_view disabled: Python3 interpreter was not found")

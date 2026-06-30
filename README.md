@@ -194,6 +194,15 @@ cmake --build build --target paper_pipeline
 
 Individual targets are also available: `rinex_features`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, and `paper_eval_attack`.
 
+Generate the LaTeX figures and PDF draft:
+
+```bash
+cmake --build build --target paper_figures
+cmake --build build --target paper_pdf
+```
+
+The draft source is `paper/main.tex`; the compiled PDF is written to `paper/build/main.pdf`.
+
 Extract raw RINEX observation features directly:
 
 ```bash
