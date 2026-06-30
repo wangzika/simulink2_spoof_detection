@@ -13,7 +13,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(PROJECT_ROOT / "build" / "matplotlib_c
 os.environ.setdefault("XDG_CACHE_HOME", str(PROJECT_ROOT / "build" / "font_cache"))
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
 import numpy as np
 import pandas as pd
 
@@ -64,6 +64,12 @@ def load_inputs(args: argparse.Namespace):
     matrix = pd.read_csv(require(adaptive_dir / "matrix_results.csv"))
     detector_summary = pd.read_csv(require(adaptive_dir / "detector_summary.csv"))
     scenario_summary = pd.read_csv(require(adaptive_dir / "scenario_summary.csv"))
+    attack_type_summary = pd.read_csv(require(adaptive_dir / "attack_type_summary.csv"))
+    attack_strength_summary = pd.read_csv(require(adaptive_dir / "attack_strength_summary.csv"))
+    attack_ramp_summary = pd.read_csv(require(adaptive_dir / "attack_ramp_summary.csv"))
+    environment_summary = pd.read_csv(require(adaptive_dir / "environment_summary.csv"))
+    sensitivity_summary = pd.read_csv(require(adaptive_dir / "sensitivity_summary.csv"))
+    attack_classification_summary = pd.read_csv(require(adaptive_dir / "attack_classification_summary.csv"))
     adaptive_timeline = pd.read_csv(require(adaptive_dir / "adaptive_timeline.csv"))
     experiment_summary = json.loads(require(adaptive_dir / "experiment_summary.json").read_text(encoding="utf-8"))
     return (
@@ -76,6 +82,12 @@ def load_inputs(args: argparse.Namespace):
         matrix,
         detector_summary,
         scenario_summary,
+        attack_type_summary,
+        attack_strength_summary,
+        attack_ramp_summary,
+        environment_summary,
+        sensitivity_summary,
+        attack_classification_summary,
         adaptive_timeline,
         experiment_summary,
     )
@@ -373,6 +385,107 @@ def plot_ablation_comparison(detector_summary: pd.DataFrame, output_dir: Path) -
     savefig(output_dir / "ablation_comparison.png")
 
 
+def pretty_attack_type(value: str) -> str:
+    names = {
+        "position_bias": "Position\nbias",
+        "pseudorange_delay": "Pseudorange\ndelay",
+        "single_sat_outlier": "Single-sat\noutlier",
+        "coordinated_spoof": "Coordinated\nspoof",
+        "slow_drift": "Slow\ndrift",
+    }
+    return names.get(value, value.replace("_", "\n"))
+
+
+def plot_attack_type_breakdown(attack_type_summary: pd.DataFrame, output_dir: Path) -> None:
+    order = ["position_bias", "pseudorange_delay", "single_sat_outlier", "coordinated_spoof", "slow_drift"]
+    detectors = ["fixed_fused", "adaptive_seq_full"]
+    labels = {"fixed_fused": "Fixed fused", "adaptive_seq_full": "EA-SGLRT"}
+    data = attack_type_summary[attack_type_summary["detector"].isin(detectors)]
+    if data.empty:
+        return
+    pivot = data.pivot_table(index="attack_type", columns="detector", values="f1_mean", aggfunc="mean").reindex(order)
+    pivot = pivot[[detector for detector in detectors if detector in pivot.columns]].fillna(0.0)
+    x = np.arange(len(pivot.index))
+    width = 0.34
+    fig, ax = plt.subplots(figsize=(8.6, 3.9))
+    for idx, detector_name in enumerate(pivot.columns):
+        offset = (idx - (len(pivot.columns) - 1) / 2.0) * width
+        bars = ax.bar(x + offset, pivot[detector_name], width=width, label=labels.get(detector_name, detector_name))
+        ax.bar_label(bars, labels=[f"{value:.2f}" for value in pivot[detector_name]], padding=2, fontsize=7)
+    ax.set_xticks(x)
+    ax.set_xticklabels([pretty_attack_type(str(value)) for value in pivot.index])
+    ax.set_ylabel("Mean attack F1")
+    ax.set_ylim(0, max(0.62, float(pivot.to_numpy().max()) * 1.18))
+    ax.set_title("Attack-type performance breakdown")
+    ax.legend(loc="upper left", fontsize=8)
+    ax.grid(axis="y", alpha=0.25)
+    savefig(output_dir / "attack_type_breakdown.png")
+
+
+def plot_environment_false_alarm(environment_summary: pd.DataFrame, output_dir: Path) -> None:
+    order = ["raim_only", "pseudorange_glrt_only", "lio_residual_only", "fixed_fused", "adaptive_seq_full"]
+    labels = {
+        "raim_only": "RAIM",
+        "pseudorange_glrt_only": "PR GLRT",
+        "lio_residual_only": "LIO-GNSS",
+        "fixed_fused": "Fixed fused",
+        "adaptive_seq_full": "EA-SGLRT",
+    }
+    data = environment_summary.set_index("detector").loc[[item for item in order if item in set(environment_summary["detector"])]]
+    x = np.arange(len(data))
+    clean = data["clean_false_alarm_per_min"].to_numpy(dtype=float)
+    degraded = data["degraded_false_alarm_per_min"].to_numpy(dtype=float)
+    fig, ax = plt.subplots(figsize=(8.6, 3.9))
+    ax.bar(x - 0.18, np.maximum(clean, 1e-3), width=0.36, label="Clean", color="#1864ab")
+    ax.bar(x + 0.18, np.maximum(degraded, 1e-3), width=0.36, label="Degraded non-attack", color="#e67700")
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels([labels.get(idx, idx) for idx in data.index], rotation=18, ha="right")
+    ax.set_ylabel("False alarms/min (log)")
+    ax.set_title("False alarms under clean and degraded non-attack data")
+    ax.legend(loc="upper left", fontsize=8)
+    ax.grid(axis="y", alpha=0.25, which="both")
+    savefig(output_dir / "environment_false_alarm.png")
+
+
+def plot_parameter_sensitivity(sensitivity_summary: pd.DataFrame, output_dir: Path) -> None:
+    if sensitivity_summary.empty:
+        return
+    f1 = sensitivity_summary.pivot_table(index="adaptive_gain", columns="cusum_threshold", values="attack_f1_mean", aggfunc="mean")
+    fa = sensitivity_summary.pivot_table(index="adaptive_gain", columns="cusum_threshold", values="mean_false_alarm_per_min", aggfunc="mean")
+    f1 = f1.sort_index().sort_index(axis=1)
+    fa = fa.reindex(index=f1.index, columns=f1.columns)
+    selected = sensitivity_summary[sensitivity_summary["is_selected_config"] > 0]
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 3.9), sharey=True)
+    for ax, pivot, title, cmap, vmin, vmax in [
+        (axes[0], f1, "Attack F1", "viridis", 0.0, 1.0),
+        (axes[1], fa, "Mean FA/min", "magma_r", 0.0, max(1.0, float(fa.to_numpy(dtype=float).max()))),
+    ]:
+        im = ax.imshow(pivot.to_numpy(dtype=float), origin="lower", aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+        ax.set_xticks(np.arange(len(pivot.columns)))
+        ax.set_xticklabels([f"{value:g}" for value in pivot.columns])
+        ax.set_yticks(np.arange(len(pivot.index)))
+        ax.set_yticklabels([f"{value:g}" for value in pivot.index])
+        ax.set_xlabel("CUSUM threshold")
+        ax.set_title(title)
+        for i in range(len(pivot.index)):
+            for j in range(len(pivot.columns)):
+                value = float(pivot.iloc[i, j])
+                ax.text(j, i, f"{value:.2f}", ha="center", va="center", color="white", fontsize=7)
+        if not selected.empty:
+            gain = float(selected.iloc[0]["adaptive_gain"])
+            threshold = float(selected.iloc[0]["cusum_threshold"])
+            if gain in set(pivot.index) and threshold in set(pivot.columns):
+                row_idx = list(pivot.index).index(gain)
+                col_idx = list(pivot.columns).index(threshold)
+                ax.add_patch(Rectangle((col_idx - 0.5, row_idx - 0.5), 1, 1, fill=False, edgecolor="#ffffff", linewidth=2.0))
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.ax.tick_params(labelsize=7)
+    axes[0].set_ylabel("Adaptive gain")
+    fig.suptitle("Parameter sensitivity of EA-SGLRT", y=1.02, fontsize=10)
+    savefig(output_dir / "parameter_sensitivity.png")
+
+
 def plot_adaptive_cusum_timeline(timeline: pd.DataFrame, output_dir: Path) -> None:
     if timeline.empty:
         return
@@ -414,6 +527,10 @@ def write_metrics_tex(
     rinex_summary: dict,
     detector_summary: pd.DataFrame,
     scenario_summary: pd.DataFrame,
+    attack_type_summary: pd.DataFrame,
+    environment_summary: pd.DataFrame,
+    sensitivity_summary: pd.DataFrame,
+    attack_classification_summary: pd.DataFrame,
     experiment_summary: dict,
 ) -> None:
     best_f1 = attack_metrics.get("threshold_sweep", {}).get("best_f1", {})
@@ -423,11 +540,38 @@ def write_metrics_tex(
     raw_reference_mean = float(pd.to_numeric(attack.get("raw_reference_residual_rms_m", pd.Series(dtype=float)), errors="coerce").fillna(0).mean())
     summary_by_detector = detector_summary.set_index("detector")
     paired_stats = experiment_summary.get("paired_statistics", {})
+    primary_attack_types = attack_type_summary[attack_type_summary["detector"] == "adaptive_seq_full"].copy()
+    primary_attack_types = primary_attack_types.sort_values("f1_mean") if not primary_attack_types.empty else primary_attack_types
+    worst_attack = primary_attack_types.iloc[0] if not primary_attack_types.empty else None
+    best_attack = primary_attack_types.iloc[-1] if not primary_attack_types.empty else None
+    sensitivity = sensitivity_summary.copy()
+    sensitivity = sensitivity.sort_values(["attack_f1_mean", "mean_false_alarm_per_min"], ascending=[False, True]) if not sensitivity.empty else sensitivity
+    best_sensitivity = sensitivity.iloc[0] if not sensitivity.empty else None
+    selected_sensitivity_rows = sensitivity_summary[sensitivity_summary["is_selected_config"] > 0]
+    selected_sensitivity = selected_sensitivity_rows.iloc[0] if not selected_sensitivity_rows.empty else best_sensitivity
+    classification_fraction = (
+        float(pd.to_numeric(attack_classification_summary["dominant_predicted_fraction"], errors="coerce").fillna(0.0).mean())
+        if not attack_classification_summary.empty
+        else 0.0
+    )
 
     def dvalue(detector: str, column: str) -> float:
         if detector not in summary_by_detector.index:
             return 0.0
         return float(summary_by_detector.loc[detector, column])
+
+    def pretty_name(value: object) -> str:
+        text = str(value).replace("_", " ")
+        return text.replace("single sat", "single-sat")
+
+    def row_value(row: pd.Series | None, column: str, default: float = 0.0) -> float:
+        if row is None:
+            return default
+        value = row.get(column, default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     rows = [
         macro("RinexEpochCount", f"{int(rinex_summary['epochs'])}"),
@@ -454,21 +598,49 @@ def write_metrics_tex(
         macro("AdaptiveSeqRecall", f"{dvalue('adaptive_seq_full', 'attack_recall_mean'):.3f}"),
         macro("AdaptiveSeqFone", f"{dvalue('adaptive_seq_full', 'attack_f1_mean'):.3f}"),
         macro("AdaptiveSeqLatency", f"{dvalue('adaptive_seq_full', 'attack_latency_mean_s'):.3f}"),
+        macro("AdaptiveSeqCleanFalseAlarm", f"{dvalue('adaptive_seq_full', 'clean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveSeqFalseAlarm", f"{dvalue('adaptive_seq_full', 'mean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveSeqDegradedFalseAlarm", f"{dvalue('adaptive_seq_full', 'degraded_false_alarm_per_min'):.3f}"),
         macro("FixedFusedMatrixFone", f"{dvalue('fixed_fused', 'attack_f1_mean'):.3f}"),
+        macro("FixedFusedPrecision", f"{dvalue('fixed_fused', 'attack_precision_mean'):.3f}"),
+        macro("FixedFusedRecall", f"{dvalue('fixed_fused', 'attack_recall_mean'):.3f}"),
+        macro("FixedFusedCleanFalseAlarm", f"{dvalue('fixed_fused', 'clean_false_alarm_per_min'):.3f}"),
+        macro("FixedFusedDegradedFalseAlarm", f"{dvalue('fixed_fused', 'degraded_false_alarm_per_min'):.3f}"),
         macro("FixedFusedMatrixFalseAlarm", f"{dvalue('fixed_fused', 'mean_false_alarm_per_min'):.3f}"),
         macro("PseudorangeGlrtFone", f"{dvalue('pseudorange_glrt_only', 'attack_f1_mean'):.3f}"),
+        macro("PseudorangeGlrtPrecision", f"{dvalue('pseudorange_glrt_only', 'attack_precision_mean'):.3f}"),
+        macro("PseudorangeGlrtRecall", f"{dvalue('pseudorange_glrt_only', 'attack_recall_mean'):.3f}"),
+        macro("PseudorangeGlrtFalseAlarm", f"{dvalue('pseudorange_glrt_only', 'mean_false_alarm_per_min'):.3f}"),
         macro("LioResidualFone", f"{dvalue('lio_residual_only', 'attack_f1_mean'):.3f}"),
+        macro("LioResidualPrecision", f"{dvalue('lio_residual_only', 'attack_precision_mean'):.3f}"),
+        macro("LioResidualRecall", f"{dvalue('lio_residual_only', 'attack_recall_mean'):.3f}"),
+        macro("LioResidualFalseAlarm", f"{dvalue('lio_residual_only', 'mean_false_alarm_per_min'):.3f}"),
         macro("RaimOnlyFone", f"{dvalue('raim_only', 'attack_f1_mean'):.3f}"),
+        macro("RaimOnlyPrecision", f"{dvalue('raim_only', 'attack_precision_mean'):.3f}"),
+        macro("RaimOnlyRecall", f"{dvalue('raim_only', 'attack_recall_mean'):.3f}"),
+        macro("AdaptiveFusedFone", f"{dvalue('adaptive_fused', 'attack_f1_mean'):.3f}"),
+        macro("AdaptiveFusedPrecision", f"{dvalue('adaptive_fused', 'attack_precision_mean'):.3f}"),
+        macro("AdaptiveFusedRecall", f"{dvalue('adaptive_fused', 'attack_recall_mean'):.3f}"),
+        macro("AdaptiveFusedFalseAlarm", f"{dvalue('adaptive_fused', 'mean_false_alarm_per_min'):.3f}"),
         macro("NoRawFone", f"{dvalue('adaptive_seq_no_raw', 'attack_f1_mean'):.3f}"),
         macro("NoLioFone", f"{dvalue('adaptive_seq_no_lio', 'attack_f1_mean'):.3f}"),
         macro("NoEnvFone", f"{dvalue('adaptive_seq_no_env', 'attack_f1_mean'):.3f}"),
         macro("NoCusumFone", f"{dvalue('adaptive_seq_no_cusum', 'attack_f1_mean'):.3f}"),
+        macro("AttackTypeBestName", pretty_name(best_attack["attack_type"]) if best_attack is not None else "n/a"),
+        macro("AttackTypeBestFone", f"{row_value(best_attack, 'f1_mean'):.3f}"),
+        macro("AttackTypeWorstName", pretty_name(worst_attack["attack_type"]) if worst_attack is not None else "n/a"),
+        macro("AttackTypeWorstFone", f"{row_value(worst_attack, 'f1_mean'):.3f}"),
+        macro("AttackTypeWorstRecall", f"{row_value(worst_attack, 'recall_mean'):.3f}"),
+        macro("AttackClassificationDominantFraction", f"{classification_fraction:.3f}"),
+        macro("SensitivityBestFone", f"{row_value(best_sensitivity, 'attack_f1_mean'):.3f}"),
+        macro("SensitivityBestGain", f"{row_value(best_sensitivity, 'adaptive_gain'):.2f}"),
+        macro("SensitivityBestCusum", f"{row_value(best_sensitivity, 'cusum_threshold'):.2f}"),
+        macro("SensitivitySelectedFone", f"{row_value(selected_sensitivity, 'attack_f1_mean'):.3f}"),
+        macro("SensitivitySelectedFalseAlarm", f"{row_value(selected_sensitivity, 'mean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveVsFixedFoneGain", f"{float(paired_stats.get('mean_f1_difference', 0.0)):.3f}"),
         macro("AdaptiveVsFixedCiLow", f"{float(paired_stats.get('ci95_low', 0.0)):.3f}"),
         macro("AdaptiveVsFixedCiHigh", f"{float(paired_stats.get('ci95_high', 0.0)):.3f}"),
-        macro("AdaptiveVsFixedPvalue", f"{float(paired_stats.get('sign_test_p_value', 1.0)):.3f}"),
+        macro("AdaptiveVsFixedPvalue", f"{float(paired_stats.get('sign_test_p_value', 1.0)):.4f}"),
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(rows), encoding="utf-8")
@@ -498,10 +670,18 @@ def main() -> int:
         matrix,
         detector_summary,
         scenario_summary,
+        attack_type_summary,
+        attack_strength_summary,
+        attack_ramp_summary,
+        environment_summary,
+        sensitivity_summary,
+        attack_classification_summary,
         adaptive_timeline,
         experiment_summary,
     ) = load_inputs(args)
     _ = clean
+    _ = attack_strength_summary
+    _ = attack_ramp_summary
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_architecture(output_dir)
     plot_trajectory_quality(attack, output_dir)
@@ -513,6 +693,9 @@ def main() -> int:
     plot_adaptive_baseline_comparison(detector_summary, output_dir)
     plot_attack_matrix_heatmap(matrix, output_dir)
     plot_ablation_comparison(detector_summary, output_dir)
+    plot_attack_type_breakdown(attack_type_summary, output_dir)
+    plot_environment_false_alarm(environment_summary, output_dir)
+    plot_parameter_sensitivity(sensitivity_summary, output_dir)
     plot_adaptive_cusum_timeline(adaptive_timeline, output_dir)
     write_metrics_tex(
         metrics_tex,
@@ -522,6 +705,10 @@ def main() -> int:
         rinex_summary,
         detector_summary,
         scenario_summary,
+        attack_type_summary,
+        environment_summary,
+        sensitivity_summary,
+        attack_classification_summary,
         experiment_summary,
     )
     return 0

@@ -40,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cusum-threshold", type=float, default=detector.DetectorConfig.cusum_threshold)
     parser.add_argument("--adaptive-gain", type=float, default=1.35)
     parser.add_argument("--base-threshold", type=float, default=1.0)
+    parser.add_argument("--sensitivity-gains", default="0,0.75,1.35,2.0")
+    parser.add_argument("--sensitivity-cusum-thresholds", default="0.35,0.5,0.75,1.0")
     return parser.parse_args()
 
 
@@ -310,6 +312,171 @@ def aggregate_detector_metrics(results: list[dict[str, object]]) -> list[dict[st
     return aggregate
 
 
+def mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def mean_metric(rows: list[dict[str, object]], key: str) -> float:
+    values: list[float] = []
+    for row in rows:
+        value = row.get(key, "")
+        if value == "" or value is None:
+            continue
+        values.append(float(value))
+    return mean(values)
+
+
+def grouped_metric_rows(
+    matrix_rows: list[dict[str, object]],
+    group_key: str,
+    output_key: str,
+) -> list[dict[str, object]]:
+    groups = sorted(
+        {
+            (str(row["detector"]), row[group_key])
+            for row in matrix_rows
+            if row["scenario_type"] == "synthetic_spoofing"
+        },
+        key=lambda item: (str(item[0]), float(item[1]) if isinstance(item[1], (int, float)) else str(item[1])),
+    )
+    rows: list[dict[str, object]] = []
+    for detector_name, group_value in groups:
+        items = [
+            row
+            for row in matrix_rows
+            if row["scenario_type"] == "synthetic_spoofing"
+            and row["detector"] == detector_name
+            and row[group_key] == group_value
+        ]
+        rows.append(
+            {
+                output_key: group_value,
+                "detector": detector_name,
+                "scenario_count": len(items),
+                "precision_mean": mean_metric(items, "precision"),
+                "recall_mean": mean_metric(items, "recall"),
+                "f1_mean": mean_metric(items, "f1"),
+                "roc_auc_mean": mean_metric(items, "roc_auc"),
+                "latency_mean_s": mean_metric(items, "latency_mean_s"),
+                "false_alarm_per_min_mean": mean_metric(items, "false_alarm_per_min"),
+            }
+        )
+    return rows
+
+
+def environment_summary_rows(aggregate_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for row in aggregate_rows:
+        clean_fa = float(row["clean_false_alarm_per_min"])
+        degraded_fa = float(row["degraded_false_alarm_per_min"])
+        rows.append(
+            {
+                "detector": row["detector"],
+                "clean_false_alarm_per_min": clean_fa,
+                "degraded_false_alarm_per_min": degraded_fa,
+                "mean_false_alarm_per_min": float(row["mean_false_alarm_per_min"]),
+                "degraded_minus_clean_fa_per_min": degraded_fa - clean_fa,
+                "degraded_to_clean_ratio": degraded_fa / clean_fa if clean_fa > 1e-9 else "",
+            }
+        )
+    return rows
+
+
+def sensitivity_rows(
+    scenarios: list[tuple[dict[str, object], list[dict[str, str]]]],
+    base_config: detector.DetectorConfig,
+    gains: list[float],
+    cusum_thresholds: list[float],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for gain in gains:
+        for cusum_threshold in cusum_thresholds:
+            config = detector.DetectorConfig(
+                residual_scale_m=base_config.residual_scale_m,
+                pr_rms_scale_m=base_config.pr_rms_scale_m,
+                pr_abs_scale_m=base_config.pr_abs_scale_m,
+                reference_residual_scale_m=base_config.reference_residual_scale_m,
+                doppler_scale_mps=base_config.doppler_scale_mps,
+                base_threshold=base_config.base_threshold,
+                adaptive_gain=gain,
+                cusum_threshold=cusum_threshold,
+                cusum_drift=base_config.cusum_drift,
+                reset_leak=base_config.reset_leak,
+                confidence_slope=base_config.confidence_slope,
+            )
+            metrics = [
+                metric_row(meta, detector.run_detector(scenario_rows, "adaptive_seq_full", config, scenario=str(meta["scenario"])))
+                for meta, scenario_rows in scenarios
+            ]
+            attack_items = [row for row in metrics if row["scenario_type"] == "synthetic_spoofing"]
+            clean = next((row for row in metrics if row["scenario_type"] == "clean_real"), None)
+            degraded = next((row for row in metrics if row["scenario_type"] == "degraded_non_attack"), None)
+            rows.append(
+                {
+                    "adaptive_gain": gain,
+                    "cusum_threshold": cusum_threshold,
+                    "attack_precision_mean": mean_metric(attack_items, "precision"),
+                    "attack_recall_mean": mean_metric(attack_items, "recall"),
+                    "attack_f1_mean": mean_metric(attack_items, "f1"),
+                    "attack_latency_mean_s": mean_metric(attack_items, "latency_mean_s"),
+                    "clean_false_alarm_per_min": clean["false_alarm_per_min"] if clean else 0.0,
+                    "degraded_false_alarm_per_min": degraded["false_alarm_per_min"] if degraded else 0.0,
+                    "mean_false_alarm_per_min": mean_metric(
+                        [row for row in metrics if row["scenario_type"] != "synthetic_spoofing"],
+                        "false_alarm_per_min",
+                    ),
+                    "is_selected_config": int(
+                        abs(gain - base_config.adaptive_gain) < 1e-9
+                        and abs(cusum_threshold - base_config.cusum_threshold) < 1e-9
+                    ),
+                }
+            )
+    rows.sort(key=lambda row: (float(row["attack_f1_mean"]), -float(row["mean_false_alarm_per_min"])), reverse=True)
+    return rows
+
+
+def attack_classification_summary(
+    adaptive_outputs: list[tuple[dict[str, object], detector.DetectorOutput]]
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    attack_types = sorted({str(meta["attack_type"]) for meta, _output in adaptive_outputs if meta["scenario_type"] == "synthetic_spoofing"})
+    for attack_type in attack_types:
+        predicted_counts: dict[str, int] = {}
+        positive_rows = 0
+        detected_positive_rows = 0
+        for meta, output in adaptive_outputs:
+            if meta["scenario_type"] != "synthetic_spoofing" or meta["attack_type"] != attack_type:
+                continue
+            for row in output.rows:
+                if detector.to_float(row, "attack_label") < 0.5:
+                    continue
+                positive_rows += 1
+                if detector.to_float(row, "detected") >= 0.5:
+                    detected_positive_rows += 1
+                    predicted = row.get("attack_type", "unknown")
+                    predicted_counts[predicted] = predicted_counts.get(predicted, 0) + 1
+        dominant_type = ""
+        dominant_count = 0
+        if predicted_counts:
+            dominant_type, dominant_count = max(predicted_counts.items(), key=lambda item: item[1])
+        rows.append(
+            {
+                "true_attack_type": attack_type,
+                "positive_rows": positive_rows,
+                "detected_positive_rows": detected_positive_rows,
+                "attack_sample_recall": detected_positive_rows / positive_rows if positive_rows else 0.0,
+                "dominant_predicted_type": dominant_type,
+                "dominant_predicted_fraction": dominant_count / detected_positive_rows if detected_positive_rows else 0.0,
+                "raw_observation_outlier_count": predicted_counts.get("raw_observation_outlier", 0),
+                "pseudorange_bias_count": predicted_counts.get("pseudorange_bias", 0),
+                "lio_gnss_inconsistency_count": predicted_counts.get("lio_gnss_inconsistency", 0),
+                "coordinated_spoofing_count": predicted_counts.get("coordinated_spoofing", 0),
+                "multi_cue_anomaly_count": predicted_counts.get("multi_cue_anomaly", 0),
+            }
+        )
+    return rows
+
+
 def metric_row(scenario_meta: dict[str, object], output: detector.DetectorOutput) -> dict[str, object]:
     metrics = output.metrics
     latency = metrics["detection_latency_s"]
@@ -342,6 +509,8 @@ def write_markdown(
     aggregate_rows: list[dict[str, object]],
     scenario_rows: list[dict[str, object]],
     paired_stats: dict[str, object],
+    attack_type_rows: list[dict[str, object]],
+    sensitivity: list[dict[str, object]],
 ) -> None:
     lines = [
         "# Adaptive Sequential GLRT Experiment Matrix",
@@ -369,8 +538,32 @@ def write_markdown(
             f"- Mean F1 difference: {float(paired_stats['mean_f1_difference']):.6f}",
             f"- Bootstrap 95% CI: [{float(paired_stats['ci95_low']):.6f}, {float(paired_stats['ci95_high']):.6f}]",
             f"- Sign-test p-value: {float(paired_stats['sign_test_p_value']):.6g}",
+            "",
+            "## Attack-Type Breakdown",
+            "",
+            "| Attack type | EA-SGLRT F1 | EA-SGLRT recall | Mean latency (s) |",
+            "| --- | ---: | ---: | ---: |",
         ]
     )
+    for row in attack_type_rows:
+        if row["detector"] != "adaptive_seq_full":
+            continue
+        lines.append(
+            f"| {row['attack_type']} | {float(row['f1_mean']):.3f} | {float(row['recall_mean']):.3f} | "
+            f"{float(row['latency_mean_s']):.3f} |"
+        )
+    if sensitivity:
+        best = sensitivity[0]
+        selected = next((row for row in sensitivity if int(row["is_selected_config"]) == 1), best)
+        lines.extend(
+            [
+                "",
+                "## Parameter Sensitivity",
+                "",
+                f"- Best grid F1: {float(best['attack_f1_mean']):.3f} at adaptive_gain={float(best['adaptive_gain']):.2f}, cusum_threshold={float(best['cusum_threshold']):.2f}.",
+                f"- Selected config F1: {float(selected['attack_f1_mean']):.3f}, mean FA/min={float(selected['mean_false_alarm_per_min']):.3f}.",
+            ]
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -481,6 +674,7 @@ def main() -> int:
     detectors = detector.DETECTORS
     matrix_rows: list[dict[str, object]] = []
     default_timeline: list[dict[str, str]] | None = None
+    adaptive_outputs: list[tuple[dict[str, object], detector.DetectorOutput]] = []
 
     for meta, rows in scenarios:
         if args.write_scenario_csvs:
@@ -490,10 +684,23 @@ def main() -> int:
             matrix_rows.append(metric_row(meta, output))
             if meta["scenario"] == args.default_scenario and output.detector == "adaptive_seq_full":
                 default_timeline = output.rows
+            if output.detector == "adaptive_seq_full":
+                adaptive_outputs.append((meta, output))
 
     scenario_rows = [meta for meta, _rows in scenarios]
     aggregate_rows = aggregate_detector_metrics(matrix_rows)
     paired_stats = paired_detector_stats(matrix_rows)
+    attack_type_rows = grouped_metric_rows(matrix_rows, "attack_type", "attack_type")
+    strength_rows = grouped_metric_rows(matrix_rows, "strength_m", "strength_m")
+    ramp_rows = grouped_metric_rows(matrix_rows, "ramp_s", "ramp_s")
+    environment_rows = environment_summary_rows(aggregate_rows)
+    sensitivity = sensitivity_rows(
+        scenarios,
+        config,
+        parse_list_float(args.sensitivity_gains),
+        parse_list_float(args.sensitivity_cusum_thresholds),
+    )
+    classification_rows = attack_classification_summary(adaptive_outputs)
 
     matrix_columns = [
         "scenario",
@@ -531,9 +738,61 @@ def main() -> int:
         "attack_scenario_count",
     ]
     scenario_columns = ["scenario", "scenario_type", "attack_type", "strength_m", "ramp_s", "rows", "positive_rows"]
+    grouped_columns = [
+        "detector",
+        "scenario_count",
+        "precision_mean",
+        "recall_mean",
+        "f1_mean",
+        "roc_auc_mean",
+        "latency_mean_s",
+        "false_alarm_per_min_mean",
+    ]
+    attack_type_columns = ["attack_type", *grouped_columns]
+    strength_columns = ["strength_m", *grouped_columns]
+    ramp_columns = ["ramp_s", *grouped_columns]
+    environment_columns = [
+        "detector",
+        "clean_false_alarm_per_min",
+        "degraded_false_alarm_per_min",
+        "mean_false_alarm_per_min",
+        "degraded_minus_clean_fa_per_min",
+        "degraded_to_clean_ratio",
+    ]
+    sensitivity_columns = [
+        "adaptive_gain",
+        "cusum_threshold",
+        "attack_precision_mean",
+        "attack_recall_mean",
+        "attack_f1_mean",
+        "attack_latency_mean_s",
+        "clean_false_alarm_per_min",
+        "degraded_false_alarm_per_min",
+        "mean_false_alarm_per_min",
+        "is_selected_config",
+    ]
+    classification_columns = [
+        "true_attack_type",
+        "positive_rows",
+        "detected_positive_rows",
+        "attack_sample_recall",
+        "dominant_predicted_type",
+        "dominant_predicted_fraction",
+        "raw_observation_outlier_count",
+        "pseudorange_bias_count",
+        "lio_gnss_inconsistency_count",
+        "coordinated_spoofing_count",
+        "multi_cue_anomaly_count",
+    ]
     write_csv(output_dir / "matrix_results.csv", matrix_columns, matrix_rows)
     write_csv(output_dir / "detector_summary.csv", aggregate_columns, aggregate_rows)
     write_csv(output_dir / "scenario_summary.csv", scenario_columns, scenario_rows)
+    write_csv(output_dir / "attack_type_summary.csv", attack_type_columns, attack_type_rows)
+    write_csv(output_dir / "attack_strength_summary.csv", strength_columns, strength_rows)
+    write_csv(output_dir / "attack_ramp_summary.csv", ramp_columns, ramp_rows)
+    write_csv(output_dir / "environment_summary.csv", environment_columns, environment_rows)
+    write_csv(output_dir / "sensitivity_summary.csv", sensitivity_columns, sensitivity)
+    write_csv(output_dir / "attack_classification_summary.csv", classification_columns, classification_rows)
     if default_timeline is None:
         # Fall back to the strongest coordinated scenario if the requested one was not generated.
         for meta, rows in scenarios:
@@ -555,12 +814,18 @@ def main() -> int:
             "matrix_results_csv": str(output_dir / "matrix_results.csv"),
             "detector_summary_csv": str(output_dir / "detector_summary.csv"),
             "scenario_summary_csv": str(output_dir / "scenario_summary.csv"),
+            "attack_type_summary_csv": str(output_dir / "attack_type_summary.csv"),
+            "attack_strength_summary_csv": str(output_dir / "attack_strength_summary.csv"),
+            "attack_ramp_summary_csv": str(output_dir / "attack_ramp_summary.csv"),
+            "environment_summary_csv": str(output_dir / "environment_summary.csv"),
+            "sensitivity_summary_csv": str(output_dir / "sensitivity_summary.csv"),
+            "attack_classification_summary_csv": str(output_dir / "attack_classification_summary.csv"),
             "adaptive_timeline_csv": str(output_dir / "adaptive_timeline.csv"),
         },
     }
     write_json(output_dir / "experiment_summary.json", summary)
     write_json(output_dir / "statistical_tests.json", paired_stats)
-    write_markdown(output_dir / "experiment_summary.md", aggregate_rows, scenario_rows, paired_stats)
+    write_markdown(output_dir / "experiment_summary.md", aggregate_rows, scenario_rows, paired_stats, attack_type_rows, sensitivity)
 
     print("Adaptive experiment matrix complete")
     print(f"  scenarios: {summary['scenarios']}")

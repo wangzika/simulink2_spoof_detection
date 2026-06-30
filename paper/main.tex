@@ -25,6 +25,7 @@ Fixed-threshold residual monitors are attractive because they are transparent, b
 This paper proposes an environment-adaptive sequential generalized likelihood ratio test (EA-SGLRT) that combines raw pseudorange consistency, receiver pseudorange diagnostics, and LiDAR--GNSS residuals under a threshold adapted by C/N0, DOP, satellite count, RTK ratio, and alignment quality.
 The detector accumulates multi-cue evidence with a CUSUM-style statistic and outputs confidence and anomaly type.
 On a reproducible \MatrixScenarioCount{}-scenario matrix built from a real rover dataset, including clean data, degraded non-attack data, and \MatrixAttackScenarioCount{} synthetic spoofing cases, EA-SGLRT improves mean attack F1 to \AdaptiveSeqFone{} versus \FixedFusedMatrixFone{} for the fixed fused baseline, while reducing mean false alarms from \FixedFusedMatrixFalseAlarm{} to \AdaptiveSeqFalseAlarm{} alarms/min.
+The improvement is consistent across paired spoofing scenarios, with mean F1 gain \AdaptiveVsFixedFoneGain{} and bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}].
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -83,8 +84,11 @@ The raw residual layer contributes \RawRaimCoverageRows{} synchronized RAIM-capa
 
 \section{Method}
 Let $z_t$ denote the synchronized feature vector at epoch $t$.
-EA-SGLRT first computes normalized cue scores: LiDAR--GNSS residual score $S_L$, receiver pseudorange score $S_P$, raw GNSS score $S_R$, Doppler/TDCP score $S_D$ when present, and RTK-quality score $S_Q$.
-The raw score is the maximum of the GPS RAIM chi-square ratio and the RTK-reference pseudorange RMS ratio.
+The null hypothesis $H_0$ contains nominal operation and benign environmental degradation; the alternative $H_1$ contains spoofing that creates persistent inconsistency among raw observations, receiver diagnostics, and LiDAR--inertial odometry.
+EA-SGLRT therefore separates two operations that are conflated by fixed thresholds: environment normalization and sequential evidence accumulation.
+
+The detector first computes normalized cue scores: LiDAR--GNSS residual score $S_L$, receiver pseudorange score $S_P$, raw GNSS score $S_R$, Doppler/TDCP score $S_D$ when present, and RTK-quality score $S_Q$.
+In implementation, $S_L$ is the maximum of Euclidean residual and Mahalanobis-gate ratios, $S_P$ is the maximum of pseudorange RMS and absolute-residual ratios, and $S_R$ is the maximum of the GPS RAIM chi-square ratio and the RTK-reference pseudorange RMS ratio.
 The instantaneous fused evidence is
 \begin{equation}
 G_t=w_L S_L+w_P S_P+w_R S_R+w_D S_D+w_Q S_Q .
@@ -96,6 +100,7 @@ The threshold is adapted with an environment degradation index $E_t$:
 \end{equation}
 where $E_t$ is a weighted combination of low C/N0, high DOP, low satellite count, low RTK ratio, poor RTK status, low healthy-pseudorange count, and rejected pseudorange outliers.
 The missing-raw term prevents LiDAR-only excursions from accumulating strong spoofing evidence when broadcast-ephemeris residuals are unavailable.
+This design makes the detector more conservative under $H_0$ degradation while still allowing persistent cross-cue evidence under $H_1$ to pass the threshold.
 
 Sequential confirmation is performed with a CUSUM-style statistic:
 \begin{equation}
@@ -106,7 +111,8 @@ The detector also reports confidence
 \begin{equation}
 p_t=\sigma\left(k\left(\frac{C_t}{h}-0.72\right)\right),
 \end{equation}
-and assigns an anomaly type by the dominant cue: raw-observation outlier, pseudorange bias, LiDAR--GNSS inconsistency, coordinated spoofing, or benign degradation.
+and assigns an explanatory anomaly type by the dominant cue: raw-observation outlier, pseudorange bias, LiDAR--GNSS inconsistency, coordinated spoofing, or benign degradation.
+This type is used for diagnosis rather than as a supervised semantic classifier.
 Fig.~\ref{fig:cusum} shows the resulting score, adaptive threshold, CUSUM, confidence, and degradation index for a representative attack.
 
 \begin{figure}[!t]
@@ -117,12 +123,14 @@ Fig.~\ref{fig:cusum} shows the resulting score, adaptive threshold, CUSUM, confi
 \end{figure}
 
 \section{Experiments}
+\subsection{Protocol}
 The experiment matrix contains clean real data, degraded non-attack data, and synthetic spoofing generated from the synchronized real dataset.
 Spoofing cases vary attack strength at 1, 2, 5, and 10 m; ramp time at 1, 5, 20, and 60 s; and attack type across position bias, pseudorange delay, single-satellite outlier, coordinated spoofing, and slow drift.
 The degraded non-attack case lowers C/N0, worsens DOP, reduces RTK ratio and satellite availability, and increases moderate multipath-like pseudorange scatter without changing the spoofing label.
 This design tests whether a detector separates adversarial consistency violations from ordinary quality degradation.
 
 We compare EA-SGLRT with RAIM-only, pseudorange GLRT-only, LiDAR--GNSS residual-only, fixed-threshold fused detection, adaptive non-sequential fused detection, and ablations that remove raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM.
+Metrics are computed per scenario and then averaged over the \MatrixAttackScenarioCount{} spoofing scenarios; false alarms/min are computed from the clean and degraded non-attack scenarios.
 For statistical comparison, each synthetic attack scenario is treated as a paired trial between EA-SGLRT and the fixed fused detector.
 EA-SGLRT improves F1 by \AdaptiveVsFixedFoneGain{} on average, with bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}] and sign-test $p=\AdaptiveVsFixedPvalue{}$.
 
@@ -130,15 +138,16 @@ EA-SGLRT improves F1 by \AdaptiveVsFixedFoneGain{} on average, with bootstrap 95
 \centering
 \caption{Detector comparison over the \MatrixScenarioCount{}-scenario matrix.}
 \label{tab:matrix}
-\begin{tabular}{lccc}
+\begin{tabular}{lcccc}
 \toprule
-Detector & F1 & Recall & FA/min \\
+Detector & Prec. & Recall & F1 & FA/min \\
 \midrule
-RAIM only & \RaimOnlyFone{} & -- & 0.000 \\
-Pseudorange GLRT & \PseudorangeGlrtFone{} & -- & -- \\
-LiDAR--GNSS residual & \LioResidualFone{} & -- & -- \\
-Fixed fused & \FixedFusedMatrixFone{} & -- & \FixedFusedMatrixFalseAlarm{} \\
-EA-SGLRT & \AdaptiveSeqFone{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFalseAlarm{} \\
+RAIM & \RaimOnlyPrecision{} & \RaimOnlyRecall{} & \RaimOnlyFone{} & 0.000 \\
+PR GLRT & \PseudorangeGlrtPrecision{} & \PseudorangeGlrtRecall{} & \PseudorangeGlrtFone{} & \PseudorangeGlrtFalseAlarm{} \\
+LIO--GNSS & \LioResidualPrecision{} & \LioResidualRecall{} & \LioResidualFone{} & \LioResidualFalseAlarm{} \\
+Fixed fused & \FixedFusedPrecision{} & \FixedFusedRecall{} & \FixedFusedMatrixFone{} & \FixedFusedMatrixFalseAlarm{} \\
+Adaptive fused & \AdaptiveFusedPrecision{} & \AdaptiveFusedRecall{} & \AdaptiveFusedFone{} & \AdaptiveFusedFalseAlarm{} \\
+EA-SGLRT & \AdaptiveSeqPrecision{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFone{} & \AdaptiveSeqFalseAlarm{} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -150,9 +159,11 @@ EA-SGLRT & \AdaptiveSeqFone{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFalseAlarm{} 
     \label{fig:baseline}
 \end{figure}
 
+\subsection{Attack Factor Study}
 Fig.~\ref{fig:heatmap} summarizes performance across attack strength and ramp duration.
 As expected, low-amplitude and slow-ramp attacks are hardest because their residuals remain comparable to benign motion and multipath.
 The sequential detector improves stability by accumulating weak evidence, but the results still expose the need for longer real overlap sequences and multi-constellation raw residuals.
+Across attack types, the best mean F1 is obtained for \AttackTypeBestName{} attacks (\AttackTypeBestFone{}), while the hardest type is \AttackTypeWorstName{} with F1 \AttackTypeWorstFone{} and recall \AttackTypeWorstRecall{}.
 
 \begin{figure}[!t]
     \centering
@@ -163,27 +174,68 @@ The sequential detector improves stability by accumulating weak evidence, but th
 
 \begin{figure}[!t]
     \centering
+    \includegraphics[width=\linewidth]{attack_type_breakdown.png}
+    \caption{Attack-type breakdown. EA-SGLRT improves over fixed fusion for position-bias, pseudorange-delay, coordinated, and slow-drift attacks, with the smallest gain on the single-satellite outlier case where residual evidence is already strong.}
+    \label{fig:attacktype}
+\end{figure}
+
+\subsection{Benign Degradation and Ablation}
+Fig.~\ref{fig:environment} directly tests the false-alarm failure mode that motivates the method.
+The fixed fused detector produces \FixedFusedDegradedFalseAlarm{} false alarms/min on degraded non-attack data, whereas EA-SGLRT reduces this to \AdaptiveSeqDegradedFalseAlarm{} false alarms/min by raising the threshold when C/N0, DOP, RTK ratio, and satellite availability indicate poor conditions.
+On clean data, the two fused detectors have comparable false-alarm rates (\FixedFusedCleanFalseAlarm{} and \AdaptiveSeqCleanFalseAlarm{} false alarms/min), showing that the main robustness gain comes from environment adaptation rather than simply suppressing all detections.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{environment_false_alarm.png}
+    \caption{False alarms under clean and degraded non-attack data. Zero false-alarm bars are shown at a small plotting floor because the axis is logarithmic.}
+    \label{fig:environment}
+\end{figure}
+
+\begin{figure}[!t]
+    \centering
     \includegraphics[width=\linewidth]{ablation_comparison.png}
     \caption{Ablation study. Removing raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM reduces the mean attack F1.}
     \label{fig:ablation}
 \end{figure}
 
+Fig.~\ref{fig:ablation} confirms that both sensing streams and both decision mechanisms are needed.
+Removing raw GNSS drops F1 to \NoRawFone{}, removing LiDAR--GNSS consistency drops F1 to \NoLioFone{}, removing environment adaptation drops F1 to \NoEnvFone{}, and replacing sequential accumulation with an instantaneous adaptive gate drops F1 to \NoCusumFone{}.
+
+\subsection{Parameter Sensitivity}
+Fig.~\ref{fig:sensitivity} sweeps the adaptive gain and CUSUM threshold.
+The best grid point reaches F1 \SensitivityBestFone{} at gain \SensitivityBestGain{} and threshold \SensitivityBestCusum{}, but this more aggressive operating point increases false alarms.
+The selected setting keeps F1 \SensitivitySelectedFone{} while reducing mean false alarms to \SensitivitySelectedFalseAlarm{} alarms/min, which better matches the target of lowering false positives under degraded but non-attack operation.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{parameter_sensitivity.png}
+    \caption{Parameter sensitivity of EA-SGLRT. The outlined cell is the selected operating point used in the main experiments.}
+    \label{fig:sensitivity}
+\end{figure}
+
 \section{Discussion}
 EA-SGLRT improves over fixed fusion because it changes the decision problem from a single residual threshold to persistent, environment-normalized evidence.
-When C/N0 is low, DOP is poor, or RTK ambiguity quality is weak, the detector raises the effective threshold and prevents short LiDAR--GNSS residual bursts from becoming spoofing declarations.
-When raw pseudorange residuals and LiDAR--GNSS residuals rise together, evidence accumulates quickly.
-The ablation in Fig.~\ref{fig:ablation} shows that raw GNSS and LiDAR consistency are complementary: removing either reduces F1, and removing environment adaptation produces many false alarms in degraded intervals.
+Urban degradation and spoofing can both increase residuals, but they differ in how evidence is distributed across cues and time.
+Benign degradation usually appears together with low C/N0, poor geometry, fewer reliable satellites, and weaker RTK quality; EA-SGLRT treats these as reasons to raise $\tau_t$ and to discount short-lived residual bursts.
+Spoofing, in contrast, is modeled as persistent cross-cue inconsistency: raw pseudorange residuals, receiver pseudorange diagnostics, and LiDAR--GNSS residuals should rise together after the ramp.
+
+The attack-factor study also clarifies the remaining failure modes.
+Slow-drift attacks are hardest because they deliberately keep instantaneous residuals near the benign-motion envelope, which delays CUSUM accumulation.
+Single-satellite outliers are easier for pseudorange monitors, so the gain over fixed fusion is smaller than for coordinated or pseudorange-delay attacks.
+The explanatory anomaly type is stable in most detected samples, with dominant-cue fraction \AttackClassificationDominantFraction{}, but it should be interpreted as a diagnosis of which cue fired rather than a final semantic attack classifier.
 
 \section{Limitations}
 The current raw residual engine is GPS-only, and the rover RINEX stream does not expose Doppler observations, so Doppler/TDCP is not yet fully exploited.
 The raw residual overlap with FAST\_GLIO is limited to \RawRaimCoverageRows{} synchronized samples; longer synchronized sequences are needed for final statistical claims.
 The spoofing experiments are synthetic rather than collected from a live RF spoofing campaign.
-They are still useful because the injector modifies observation-level pseudoranges and post-fusion residuals in controlled ways, but a journal submission should validate the final detector on additional open-sky, urban, and real or replayed spoofing datasets.
+They are still useful because the injector modifies observation-level pseudoranges and post-fusion residuals in controlled ways while preserving the real trajectory, satellite geometry, C/N0, DOP, RTK status, and LiDAR--inertial logs.
+However, a journal submission should validate the final detector on additional open-sky, urban, and real or replayed spoofing datasets, and should report per-route confidence intervals rather than relying on a single synchronized rover sequence.
+The current parameter sweep is a first robustness check; future work should tune on one route and test on unseen routes to remove any remaining dataset-specific calibration.
 
 \section{Conclusion}
 This paper converts the previous platform draft into a method-oriented detector: an environment-adaptive sequential GLRT that fuses raw GNSS and LiDAR--inertial consistency.
-The implementation is fully reproducible from the repository targets, generates a multi-scenario experiment matrix, and shows improved F1 and reduced false alarms compared with fixed-threshold fusion.
-The next research step is multi-constellation raw residual modeling and validation on longer degraded and spoofed field sequences.
+The implementation is fully reproducible from the repository targets, generates a multi-scenario experiment matrix, and shows improved F1, lower degraded-environment false alarms, and stable parameter behavior compared with fixed-threshold fusion.
+The next research step is multi-constellation raw residual modeling, route-held-out validation, and real or replayed spoofing evaluation on longer degraded field sequences.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

@@ -184,7 +184,7 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 - `tools/compute_raw_gnss_residuals.py` parses GPS broadcast ephemerides, computes raw pseudorange residuals, and writes RAIM/reference residual summaries.
 - `tools/inject_observation_attack.py` injects reproducible observation-level pseudorange attacks into per-satellite RINEX feature CSVs.
 - `tools/adaptive_sequential_detector.py` implements the Environment-Adaptive Sequential GLRT detector and the baseline/ablation detectors.
-- `tools/run_experiment_matrix.py` generates clean, degraded non-attack, multi-strength, multi-ramp, multi-type spoofing experiments and summarizes baseline comparisons.
+- `tools/run_experiment_matrix.py` generates clean, degraded non-attack, multi-strength, multi-ramp, multi-type spoofing experiments, baseline/ablation comparisons, attack-factor summaries, and parameter-sensitivity sweeps.
 - `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
 - `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, `tools/smoke_raw_residuals.py`, and `tools/smoke_adaptive_detector.py` are self-contained CTest smoke tests.
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
@@ -295,6 +295,12 @@ This writes detector comparisons and ablations:
 build/paper_platform/adaptive_experiments/matrix_results.csv
 build/paper_platform/adaptive_experiments/detector_summary.csv
 build/paper_platform/adaptive_experiments/scenario_summary.csv
+build/paper_platform/adaptive_experiments/attack_type_summary.csv
+build/paper_platform/adaptive_experiments/attack_strength_summary.csv
+build/paper_platform/adaptive_experiments/attack_ramp_summary.csv
+build/paper_platform/adaptive_experiments/environment_summary.csv
+build/paper_platform/adaptive_experiments/sensitivity_summary.csv
+build/paper_platform/adaptive_experiments/attack_classification_summary.csv
 build/paper_platform/adaptive_experiments/adaptive_timeline.csv
 ```
 

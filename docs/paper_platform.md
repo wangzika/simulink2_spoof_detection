@@ -15,6 +15,7 @@
 - 环境自适应序贯 GLRT：融合 raw GNSS residual、receiver pseudorange GLRT、LiDAR--GNSS residual、DOP/C/N0/RTK ratio/satellite count 环境质量，输出 adaptive threshold、CUSUM、confidence 和攻击类型。
 - 实验矩阵：clean real data、degraded non-attack data、80 个 synthetic spoofing case，覆盖 1/2/5/10 m 强度、1/5/20/60 s ramp、position bias/pseudorange delay/single-satellite outlier/coordinated spoof/slow drift 五类攻击。
 - Baseline/ablation：RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、fixed fused、adaptive fused、EA-SGLRT、no raw、no LIO、no environment、no CUSUM。
+- 论文级补充统计：按 attack type/strength/ramp 分组、clean vs degraded 误报分解、EA-SGLRT 参数敏感性、攻击解释类型摘要、paired bootstrap/sign-test。
 - GPS week/TOW 到 Unix 时间的转换，默认 GPST-UTC = 18 s。
 - 合成欺骗窗口注入：位置残差偏移、伪距延迟、ramp-in/ramp-out。
 - 基线检测分数：LiDAR/IMU-GNSS 残差、Mahalanobis gate、伪距 RMS/最大残差、Doppler/TDCP、RTK 质量。
@@ -133,18 +134,26 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 
 - 当前矩阵中 EA-SGLRT 在 82 场景上取得 mean attack F1 高于 fixed fused，同时 mean false alarms/min 更低。
 - 已包含固定阈值、RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
-- 下一步要把 degraded non-attack 从合成降质扩展为真实 urban/open-sky 分段，并补充统计显著性检验。
+- 已补充 attack type/strength/ramp breakdown、clean/degraded false-alarm breakdown、参数敏感性和 paired bootstrap/sign-test。
+- 下一步要把 degraded non-attack 从合成降质扩展为真实 urban/open-sky 分段，并做 route-held-out 参数选择。
 
 ## Phase 4: 论文实验矩阵
 
-需要完成的实验：
+已完成的实验：
 
-- 不同攻击幅值：1 m、2 m、5 m、10 m、渐进 ramp。
+- 不同攻击幅值：1 m、2 m、5 m、10 m。
 - 不同 ramp：1 s、5 s、20 s、60 s。
 - 不同攻击类型：位置偏移、伪距公共延迟、单星 outlier、协同欺骗、慢漂移。
-- 不同环境/质量：clean real、degraded non-attack；待补真实 open sky、遮挡、urban canyon 分段。
+- 不同环境/质量：clean real、degraded non-attack。
 - 消融：去掉 raw GNSS、去掉 LIO consistency、去掉 adaptive gate、去掉 CUSUM。
+- 统计：paired bootstrap 95% CI、sign-test、攻击类型分解、参数敏感性。
+
+投稿前仍建议补充：
+
+- 真实 open sky、遮挡、urban canyon 分段，而不只依赖合成 degraded。
+- 真实或 RF replay spoofing 数据，用于验证 observation-level synthetic attack 的外推性。
 - 鲁棒性：采样率、时间同步误差、GNSS 中断、RTK fixed/float 状态切换。
+- Route-held-out 训练/验证，避免参数只对当前路线最优。
 
 ## Phase 5: 论文初稿和投稿材料
 
