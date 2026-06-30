@@ -181,8 +181,10 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 
 - `tools/build_detection_dataset.py` merges RTKLIB `.pos`/DOP data with FAST_GLIO loose/raw/tight GNSS logs.
 - `tools/extract_rinex_features.py` extracts RINEX per-satellite raw observation features and per-epoch summaries.
+- `tools/compute_raw_gnss_residuals.py` parses GPS broadcast ephemerides, computes raw pseudorange residuals, and writes RAIM/reference residual summaries.
+- `tools/inject_observation_attack.py` injects reproducible observation-level pseudorange attacks into per-satellite RINEX feature CSVs.
 - `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
-- `tools/smoke_paper_pipeline.py` and `tools/smoke_rinex_features.py` are self-contained CTest smoke tests.
+- `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, and `tools/smoke_raw_residuals.py` are self-contained CTest smoke tests.
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
 - `docs/paper_draft.md` contains the initial paper draft skeleton.
 
@@ -192,7 +194,7 @@ Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO 
 cmake --build build --target paper_pipeline
 ```
 
-Individual targets are also available: `rinex_features`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, and `paper_eval_attack`.
+Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, and `paper_eval_attack`.
 
 Generate the LaTeX figures and PDF draft:
 
@@ -218,6 +220,42 @@ This writes:
 build/paper_platform/rinex_rover/full_data_rover_satellite_features.csv
 build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv
 build/paper_platform/rinex_rover/full_data_rover_rinex_summary.json
+```
+
+Compute GPS broadcast-ephemeris pseudorange residuals and the RAIM baseline:
+
+```bash
+python tools/compute_raw_gnss_residuals.py \
+  --obs ../full_data/gnss/rover.obs \
+  --nav ../full_data/gnss/BRDM00DLR_S_20240290000_01D_MN.rnx \
+  --rtklib-pos ../full_data/gnss/rtklib.pos \
+  --systems G \
+  --name full_data_raw_clean \
+  --output-dir build/paper_platform/raw_gnss_clean
+```
+
+Inject an observation-level pseudorange attack and recompute raw residuals:
+
+```bash
+python tools/inject_observation_attack.py \
+  --satellite-features build/paper_platform/rinex_rover/full_data_rover_satellite_features.csv \
+  --name full_data_rover_attack \
+  --output-dir build/paper_platform/rinex_rover_attack \
+  --relative-origin-csv /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_loose_diag.csv \
+  --attack-window +180:+260 \
+  --common-delay-m 18.0 \
+  --per-satellite-bias-m 180.0 \
+  --satellite-mode list \
+  --satellites G02 \
+  --systems G
+
+python tools/compute_raw_gnss_residuals.py \
+  --satellite-features build/paper_platform/rinex_rover_attack/full_data_rover_attack_satellite_features.csv \
+  --nav ../full_data/gnss/BRDM00DLR_S_20240290000_01D_MN.rnx \
+  --rtklib-pos ../full_data/gnss/rtklib.pos \
+  --systems G \
+  --name full_data_raw_attack \
+  --output-dir build/paper_platform/raw_gnss_attack
 ```
 
 Or run the tools directly:

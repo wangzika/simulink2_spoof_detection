@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw", help="FAST_GLIO Log/gnss_raw_update_log.csv.")
     parser.add_argument("--tight", help="FAST_GLIO Log/gnss_tight_pose.csv.")
     parser.add_argument("--rinex-summary", help="Optional epoch summary CSV from tools/extract_rinex_features.py.")
+    parser.add_argument("--raw-residual-summary", help="Optional raw GPS residual/RAIM epoch CSV from tools/compute_raw_gnss_residuals.py.")
     parser.add_argument("--name", default="paper_dataset", help="Output prefix.")
     parser.add_argument(
         "--output-dir",
@@ -71,6 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pr-rms-scale", type=float, default=12.0, help="Meters mapped to pseudorange RMS score 1.")
     parser.add_argument("--pr-abs-scale", type=float, default=24.0, help="Meters mapped to pseudorange max score 1.")
     parser.add_argument("--doppler-scale", type=float, default=0.35, help="m/s mapped to Doppler score 1.")
+    parser.add_argument("--raim-scale", type=float, default=1.0, help="RAIM chi-square/threshold score mapped to 1.")
+    parser.add_argument("--reference-residual-scale", type=float, default=18.0, help="Meters mapped to raw reference residual score 1.")
     return parser.parse_args()
 
 
@@ -345,6 +348,8 @@ def score_row(row: dict[str, float], args: argparse.Namespace) -> tuple[float, d
     pr_rms_score = row["effective_pr_rms_m"] / max(1e-9, args.pr_rms_scale)
     pr_abs_score = row["effective_pr_abs_max_m"] / max(1e-9, args.pr_abs_scale)
     doppler_score = row["raw_doppler_rms_mps"] / max(1e-9, args.doppler_scale)
+    raim_score = row["effective_raim_score"] / max(1e-9, args.raim_scale)
+    reference_score = row["effective_reference_residual_rms_m"] / max(1e-9, args.reference_residual_scale)
     rtk_quality_score = 0.0
     if row["rtk_quality"] > 0.0 and row["rtk_quality"] != 1.0:
         rtk_quality_score += 0.25
@@ -358,15 +363,19 @@ def score_row(row: dict[str, float], args: argparse.Namespace) -> tuple[float, d
         "score_pr_rms": pr_rms_score,
         "score_pr_abs": pr_abs_score,
         "score_doppler": doppler_score,
+        "score_raw_raim": raim_score,
+        "score_reference_residual": reference_score,
         "score_rtk_quality": rtk_quality_score,
     }
     combined = (
-        0.30 * residual_score
-        + 0.25 * maha_score
-        + 0.20 * pr_rms_score
-        + 0.15 * pr_abs_score
+        0.24 * residual_score
+        + 0.21 * maha_score
+        + 0.16 * pr_rms_score
+        + 0.12 * pr_abs_score
+        + 0.12 * raim_score
+        + 0.06 * reference_score
         + 0.05 * doppler_score
-        + 0.05 * rtk_quality_score
+        + 0.04 * rtk_quality_score
     )
     return combined, components
 
@@ -406,6 +415,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
     rtk, origin_summary = read_rtklib_pos(clean_path(args.rtklib_pos), args.gps_utc_leap_seconds, args.origin)
     dop = read_dop(clean_path(args.dop), args.gps_utc_leap_seconds)
     rinex = read_indexed_csv(clean_path(args.rinex_summary))
+    raw_residual = read_indexed_csv(clean_path(args.raw_residual_summary))
 
     stamps = base_stamps(loose, raw, tight, rtk)
     if not stamps:
@@ -431,6 +441,8 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
         "score_pr_rms",
         "score_pr_abs",
         "score_doppler",
+        "score_raw_raim",
+        "score_reference_residual",
         "score_rtk_quality",
         "loose_status_id",
         "loose_status_name",
@@ -487,6 +499,35 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
         "rinex_code_delta_rms_m",
         "rinex_doppler_consistency_rms_mps",
         "rinex_lli_satellite_count",
+        "raw_raim_used_satellite_count",
+        "raw_raim_reference_quality",
+        "raw_raim_mean_cn0_dbhz",
+        "raw_raim_min_elevation_deg",
+        "raw_raim_attack_label",
+        "raw_raim_attacked_satellite_count",
+        "raw_raim_wls_valid",
+        "raw_raim_wls_delta_e_m",
+        "raw_raim_wls_delta_n_m",
+        "raw_raim_wls_delta_u_m",
+        "raw_raim_wls_delta_norm_m",
+        "raw_raim_clock_bias_m",
+        "raw_raim_chi_square",
+        "raw_raim_threshold",
+        "raw_raim_score",
+        "raw_raim_detected",
+        "raw_raim_residual_rms_m",
+        "raw_raim_weighted_rms",
+        "raw_raim_max_abs_m",
+        "raw_raim_outlier_count",
+        "raw_reference_clock_bias_m",
+        "raw_reference_chi_square",
+        "raw_reference_threshold",
+        "raw_reference_score",
+        "raw_reference_detected",
+        "raw_reference_residual_rms_m",
+        "raw_reference_weighted_rms",
+        "raw_reference_max_abs_m",
+        "raw_reference_outlier_count",
         "synthetic_offset_x_m",
         "synthetic_offset_y_m",
         "synthetic_offset_z_m",
@@ -517,6 +558,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
             rtk_row = nearest(rtk, stamp, args.max_delta_s)
             dop_row = nearest(dop, stamp, args.max_delta_s)
             rinex_row = nearest(rinex, stamp, args.max_delta_s)
+            raw_residual_row = nearest(raw_residual, stamp, args.max_delta_s)
 
             rel_t = stamp - first_stamp
             scale = attack_scale(stamp, rel_t, windows, args.attack_ramp)
@@ -540,6 +582,8 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
             pr_rms = parse_float(raw_row, "pr_rms")
             pr_abs_mean = parse_float(raw_row, "pr_abs_mean")
             pr_abs_max = parse_float(raw_row, "pr_abs_max")
+            raw_raim_score = parse_float(raw_residual_row, "raim_score")
+            raw_reference_rms = parse_float(raw_residual_row, "reference_residual_rms_m")
             row_values = {
                 "loose_gate_chi2": parse_float(loose_row, "gate_chi2", 16.27),
                 "effective_maha": effective_maha,
@@ -547,6 +591,8 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
                 "effective_pr_rms_m": math.sqrt(pr_rms * pr_rms + delay * delay),
                 "effective_pr_abs_max_m": pr_abs_max + delay,
                 "raw_doppler_rms_mps": parse_float(raw_row, "doppler_rms"),
+                "effective_raim_score": max(raw_raim_score, float(parse_int(raw_residual_row, "raim_detected"))),
+                "effective_reference_residual_rms_m": math.sqrt(raw_reference_rms * raw_reference_rms + delay * delay),
                 "rtk_quality": parse_float(rtk_row, "rtk_quality", parse_float(loose_row, "raw_rtk_stat")),
                 "rtk_ratio": parse_float(rtk_row, "rtk_ratio", parse_float(loose_row, "raw_rtk_ratio")),
                 "raw_healthy_pr_count": parse_float(raw_row, "healthy_pr_count"),
@@ -576,6 +622,8 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
                 "score_pr_rms": fmt(components["score_pr_rms"]),
                 "score_pr_abs": fmt(components["score_pr_abs"]),
                 "score_doppler": fmt(components["score_doppler"]),
+                "score_raw_raim": fmt(components["score_raw_raim"]),
+                "score_reference_residual": fmt(components["score_reference_residual"]),
                 "score_rtk_quality": fmt(components["score_rtk_quality"]),
                 "loose_status_id": str(status_id(loose_status_name or (loose_row or {}).get("status", ""))),
                 "loose_status_name": loose_status_name,
@@ -632,6 +680,35 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
                 "rinex_code_delta_rms_m": fmt(parse_float(rinex_row, "code_delta_rms_m")),
                 "rinex_doppler_consistency_rms_mps": fmt(parse_float(rinex_row, "doppler_consistency_rms_mps")),
                 "rinex_lli_satellite_count": str(parse_int(rinex_row, "lli_satellite_count")),
+                "raw_raim_used_satellite_count": str(parse_int(raw_residual_row, "used_satellite_count")),
+                "raw_raim_reference_quality": str(parse_int(raw_residual_row, "reference_quality")),
+                "raw_raim_mean_cn0_dbhz": fmt(parse_float(raw_residual_row, "mean_cn0_dbhz")),
+                "raw_raim_min_elevation_deg": fmt(parse_float(raw_residual_row, "min_elevation_deg")),
+                "raw_raim_attack_label": str(parse_int(raw_residual_row, "attack_label")),
+                "raw_raim_attacked_satellite_count": str(parse_int(raw_residual_row, "attacked_satellite_count")),
+                "raw_raim_wls_valid": str(parse_int(raw_residual_row, "wls_valid")),
+                "raw_raim_wls_delta_e_m": fmt(parse_float(raw_residual_row, "wls_delta_e_m")),
+                "raw_raim_wls_delta_n_m": fmt(parse_float(raw_residual_row, "wls_delta_n_m")),
+                "raw_raim_wls_delta_u_m": fmt(parse_float(raw_residual_row, "wls_delta_u_m")),
+                "raw_raim_wls_delta_norm_m": fmt(parse_float(raw_residual_row, "wls_delta_norm_m")),
+                "raw_raim_clock_bias_m": fmt(parse_float(raw_residual_row, "wls_clock_bias_m")),
+                "raw_raim_chi_square": fmt(parse_float(raw_residual_row, "raim_chi_square")),
+                "raw_raim_threshold": fmt(parse_float(raw_residual_row, "raim_threshold")),
+                "raw_raim_score": fmt(raw_raim_score),
+                "raw_raim_detected": str(parse_int(raw_residual_row, "raim_detected")),
+                "raw_raim_residual_rms_m": fmt(parse_float(raw_residual_row, "raim_residual_rms_m")),
+                "raw_raim_weighted_rms": fmt(parse_float(raw_residual_row, "raim_weighted_rms")),
+                "raw_raim_max_abs_m": fmt(parse_float(raw_residual_row, "raim_max_abs_m")),
+                "raw_raim_outlier_count": str(parse_int(raw_residual_row, "raim_outlier_count")),
+                "raw_reference_clock_bias_m": fmt(parse_float(raw_residual_row, "reference_clock_bias_m")),
+                "raw_reference_chi_square": fmt(parse_float(raw_residual_row, "reference_chi_square")),
+                "raw_reference_threshold": fmt(parse_float(raw_residual_row, "reference_threshold")),
+                "raw_reference_score": fmt(parse_float(raw_residual_row, "reference_score")),
+                "raw_reference_detected": str(parse_int(raw_residual_row, "reference_detected")),
+                "raw_reference_residual_rms_m": fmt(raw_reference_rms),
+                "raw_reference_weighted_rms": fmt(parse_float(raw_residual_row, "reference_weighted_rms")),
+                "raw_reference_max_abs_m": fmt(parse_float(raw_residual_row, "reference_max_abs_m")),
+                "raw_reference_outlier_count": str(parse_int(raw_residual_row, "reference_outlier_count")),
                 "synthetic_offset_x_m": fmt(sx),
                 "synthetic_offset_y_m": fmt(sy),
                 "synthetic_offset_z_m": fmt(sz),
@@ -668,6 +745,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
             "rtk_rows": len(rtk.rows),
             "dop_rows": len(dop.rows),
             "rinex_epoch_rows": len(rinex.rows),
+            "raw_residual_epoch_rows": len(raw_residual.rows),
         },
         "origin": origin_summary,
         "outputs": {

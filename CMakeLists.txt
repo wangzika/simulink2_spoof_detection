@@ -64,8 +64,20 @@ if (Python3_EXECUTABLE)
     set(FULL_DATA_RTKLIB_POS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rtklib.pos")
     set(FULL_DATA_DOP "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/dop.txt")
     set(FULL_DATA_ROVER_OBS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rover.obs")
+    set(FULL_DATA_BROADCAST_NAV "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/BRDM00DLR_S_20240290000_01D_MN.rnx")
     set(PAPER_RINEX_SUMMARY_ARGS)
     set(PAPER_RINEX_DEPS)
+    set(PAPER_RAW_RESIDUAL_CLEAN_ARGS)
+    set(PAPER_RAW_RESIDUAL_ATTACK_ARGS)
+    set(PAPER_RAW_RESIDUAL_CLEAN_DEPS)
+    set(PAPER_RAW_RESIDUAL_ATTACK_DEPS)
+    set(FAST_GLIO_LOG_DIR "$ENV{FAST_GLIO_LOG_DIR}")
+    if ("${FAST_GLIO_LOG_DIR}" STREQUAL "")
+        set(FAST_GLIO_LOG_DIR "/Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log")
+    endif()
+    set(FAST_GLIO_LOOSE "${FAST_GLIO_LOG_DIR}/gnss_loose_diag.csv")
+    set(FAST_GLIO_RAW "${FAST_GLIO_LOG_DIR}/gnss_raw_update_log.csv")
+    set(FAST_GLIO_TIGHT "${FAST_GLIO_LOG_DIR}/gnss_tight_pose.csv")
     if (EXISTS "${FULL_DATA_RTKLIB_POS}")
         add_custom_target(adapt_full_data
             COMMAND ${Python3_EXECUTABLE}
@@ -96,6 +108,8 @@ if (Python3_EXECUTABLE)
     if (EXISTS "${FULL_DATA_ROVER_OBS}")
         set(FULL_DATA_RINEX_EPOCH_SUMMARY
             "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv")
+        set(FULL_DATA_RINEX_SATELLITE_FEATURES
+            "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover/full_data_rover_satellite_features.csv")
         set(PAPER_RINEX_SUMMARY_ARGS --rinex-summary ${FULL_DATA_RINEX_EPOCH_SUMMARY})
         set(PAPER_RINEX_DEPS rinex_features)
         add_custom_target(rinex_features
@@ -108,15 +122,65 @@ if (Python3_EXECUTABLE)
             COMMENT "Extract per-satellite RINEX observation features from rover.obs"
             VERBATIM
         )
+        if (EXISTS "${FULL_DATA_BROADCAST_NAV}" AND EXISTS "${FULL_DATA_RTKLIB_POS}")
+            set(FULL_DATA_RAW_CLEAN_EPOCH_RESIDUALS
+                "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/raw_gnss_clean/full_data_raw_clean_raw_epoch_residuals.csv")
+            set(FULL_DATA_ATTACKED_SATELLITE_FEATURES
+                "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover_attack/full_data_rover_attack_satellite_features.csv")
+            set(FULL_DATA_RAW_ATTACK_EPOCH_RESIDUALS
+                "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/raw_gnss_attack/full_data_raw_attack_raw_epoch_residuals.csv")
+            set(PAPER_RAW_RESIDUAL_CLEAN_ARGS --raw-residual-summary ${FULL_DATA_RAW_CLEAN_EPOCH_RESIDUALS})
+            set(PAPER_RAW_RESIDUAL_ATTACK_ARGS --raw-residual-summary ${FULL_DATA_RAW_ATTACK_EPOCH_RESIDUALS})
+            set(PAPER_RAW_RESIDUAL_CLEAN_DEPS raw_gnss_residuals)
+            set(PAPER_RAW_RESIDUAL_ATTACK_DEPS raw_gnss_residuals_attack)
+            add_custom_target(raw_gnss_residuals
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/compute_raw_gnss_residuals.py
+                    --obs ${FULL_DATA_ROVER_OBS}
+                    --nav ${FULL_DATA_BROADCAST_NAV}
+                    --rtklib-pos ${FULL_DATA_RTKLIB_POS}
+                    --systems G
+                    --name full_data_raw_clean
+                    --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/raw_gnss_clean
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Compute GPS broadcast-ephemeris pseudorange residuals and RAIM baseline"
+                VERBATIM
+            )
+            add_custom_target(raw_observation_attack
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/inject_observation_attack.py
+                    --satellite-features ${FULL_DATA_RINEX_SATELLITE_FEATURES}
+                    --name full_data_rover_attack
+                    --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover_attack
+                    --relative-origin-csv ${FAST_GLIO_LOOSE}
+                    --attack-window +180:+260
+                    --common-delay-m 18.0
+                    --per-satellite-bias-m 180.0
+                    --satellite-mode list
+                    --satellites G02
+                    --systems G
+                DEPENDS rinex_features
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Inject observation-level GPS pseudorange attack into RINEX satellite features"
+                VERBATIM
+            )
+            add_custom_target(raw_gnss_residuals_attack
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/compute_raw_gnss_residuals.py
+                    --satellite-features ${FULL_DATA_ATTACKED_SATELLITE_FEATURES}
+                    --nav ${FULL_DATA_BROADCAST_NAV}
+                    --rtklib-pos ${FULL_DATA_RTKLIB_POS}
+                    --systems G
+                    --name full_data_raw_attack
+                    --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/raw_gnss_attack
+                DEPENDS raw_observation_attack
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Recompute raw residuals and RAIM after observation-level attack injection"
+                VERBATIM
+            )
+        endif()
     endif()
 
-    set(FAST_GLIO_LOG_DIR "$ENV{FAST_GLIO_LOG_DIR}")
-    if ("${FAST_GLIO_LOG_DIR}" STREQUAL "")
-        set(FAST_GLIO_LOG_DIR "/Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log")
-    endif()
-    set(FAST_GLIO_LOOSE "${FAST_GLIO_LOG_DIR}/gnss_loose_diag.csv")
-    set(FAST_GLIO_RAW "${FAST_GLIO_LOG_DIR}/gnss_raw_update_log.csv")
-    set(FAST_GLIO_TIGHT "${FAST_GLIO_LOG_DIR}/gnss_tight_pose.csv")
     if (EXISTS "${FULL_DATA_RTKLIB_POS}" AND EXISTS "${FAST_GLIO_LOOSE}" AND EXISTS "${FAST_GLIO_RAW}")
         add_custom_target(paper_dataset
             COMMAND ${Python3_EXECUTABLE}
@@ -127,9 +191,10 @@ if (Python3_EXECUTABLE)
                 --raw ${FAST_GLIO_RAW}
                 --tight ${FAST_GLIO_TIGHT}
                 ${PAPER_RINEX_SUMMARY_ARGS}
+                ${PAPER_RAW_RESIDUAL_CLEAN_ARGS}
                 --name full_data_clean
                 --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean
-            DEPENDS ${PAPER_RINEX_DEPS}
+            DEPENDS ${PAPER_RINEX_DEPS} ${PAPER_RAW_RESIDUAL_CLEAN_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Build the clean paper detection dataset from full_data and FAST_GLIO logs"
             VERBATIM
@@ -143,12 +208,13 @@ if (Python3_EXECUTABLE)
                 --raw ${FAST_GLIO_RAW}
                 --tight ${FAST_GLIO_TIGHT}
                 ${PAPER_RINEX_SUMMARY_ARGS}
+                ${PAPER_RAW_RESIDUAL_ATTACK_ARGS}
                 --name full_data_attack
                 --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_attack
                 --attack-window +180:+260
                 --attack-offset 8.0,-3.0,0.5
                 --pseudorange-delay 18.0
-            DEPENDS ${PAPER_RINEX_DEPS}
+            DEPENDS ${PAPER_RINEX_DEPS} ${PAPER_RAW_RESIDUAL_ATTACK_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Build a synthetic spoofing dataset for detector evaluation"
             VERBATIM
@@ -273,6 +339,11 @@ if (BUILD_TESTING)
         add_test(
             NAME rinex_features_smoke
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_rinex_features.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        add_test(
+            NAME raw_residuals_smoke
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_raw_residuals.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

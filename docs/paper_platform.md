@@ -10,6 +10,8 @@
 - FAST_GLIO `gnss_loose_diag.csv`、`gnss_raw_update_log.csv`、`gnss_tight_pose.csv` 与 RTKLIB/DOP 的同时间轴合并。
 - RINEX `rover.obs` 原始观测特征提取：每颗卫星每历元的 code/carrier/Doppler/C/N0、LLI、SSI、码间差、code-Doppler consistency。
 - RINEX 每历元汇总特征合入检测数据集：卫星数、系统数、观测数、C/N0 统计、低 C/N0 卫星数、码间差 RMS、周跳计数。
+- GPS 广播星历原始伪距残差：解析 RINEX navigation，计算 GPS 卫星 ECEF、卫星钟差、仰角/方位角、GNSS-only WLS 后验 RAIM 残差，以及 RTK 参考位置伪距残差。
+- 观测级攻击注入：直接改写 per-satellite CSV 中的 `primary_code_m`，保留 `clean_primary_code_m`、`injected_pseudorange_bias_m`、攻击标签和 scale。
 - GPS week/TOW 到 Unix 时间的转换，默认 GPST-UTC = 18 s。
 - 合成欺骗窗口注入：位置残差偏移、伪距延迟、ramp-in/ramp-out。
 - 基线检测分数：LiDAR/IMU-GNSS 残差、Mahalanobis gate、伪距 RMS/最大残差、Doppler/TDCP、RTK 质量。
@@ -82,6 +84,9 @@ CMake 快捷入口：
 
 ```bash
 cmake --build build --target rinex_features
+cmake --build build --target raw_gnss_residuals
+cmake --build build --target raw_observation_attack
+cmake --build build --target raw_gnss_residuals_attack
 cmake --build build --target paper_dataset
 cmake --build build --target paper_dataset_attack
 cmake --build build --target paper_eval_attack
@@ -95,18 +100,20 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 
 ## Phase 2: 原始 GNSS 观测层
 
-当前已完成 RINEX 原始观测结构化。下一步要把这些观测进一步变成检测算法里的统计量：
+当前已完成 GPS-only 第一版原始残差链路。它把 RINEX 原始观测进一步变成检测算法里的统计量：
 
 - 每颗卫星的 pseudorange、carrier phase、C/N0 已抽取；base.obs 中的 Doppler 也可抽取，rover.obs 当前无 Doppler 字段。
-- 下一步补 elevation/azimuth、单差/双差、TDCP、RAIM 残差和 robust weighting。
-- 卫星系统拆分：GPS、Galileo、BDS。
-- 原始观测级 spoof injection，而不仅是融合残差级注入。
+- `tools/compute_raw_gnss_residuals.py` 已实现 GPS 广播星历解析、卫星位置/钟差、仰角/方位角、C/N0/仰角加权、GNSS-only WLS、RAIM chi-square、RTK 参考伪距残差。
+- `tools/inject_observation_attack.py` 已实现观测级 pseudorange bias 注入，输出攻击后的 per-satellite CSV，可以直接送入 raw residual 引擎。
+- 当前 full_data 默认工况使用 G02 单星 outlier + common delay 作为 RAIM stress baseline；coordinated all-satellite spoofing 可能被 WLS 位置/钟差吸收，这是 RAIM-only 的预期局限，不应作为最终方法。
 
 验收标准：
 
 - 已输出 per-satellite long-format CSV。
 - 已输出 per-epoch summary CSV，并合入检测数据集。
-- 待完成：与 `gnss_raw_update_log.csv` 的 PR RMS、healthy count、outlier count 做定量趋势匹配。
+- 已输出 raw GPS per-satellite residual CSV 和 per-epoch RAIM/reference residual CSV。
+- 已通过 `raw_residuals_smoke` 自包含测试：clean RAIM 分数低，观测级单星攻击后 RAIM 分数升高。
+- 待完成：多星座 Galileo/BDS 广播星历、ionosphere/troposphere correction、Doppler/TDCP、单差/双差、robust weighting 与 `gnss_raw_update_log.csv` 的 PR RMS/healthy count/outlier count 定量趋势匹配。
 
 ## Phase 3: 可发表检测算法
 

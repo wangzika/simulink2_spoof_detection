@@ -22,9 +22,9 @@
 \begin{abstract}
 GNSS spoofing can induce hazardous navigation errors while preserving apparently plausible satellite measurements.
 This paper presents a reproducible spoofing-detection platform that combines raw RINEX observation features, RTKLIB solution products, and LiDAR--inertial consistency diagnostics from FAST\_GLIO.
-The platform converts GPS time and Unix time onto a common axis, extracts per-satellite code, carrier, signal-strength, and loss-of-lock features, injects controlled synthetic spoofing windows, and reports precision, recall, F1 score, ROC AUC, false-alarm rate, and detection latency.
+The platform converts GPS time and Unix time onto a common axis, extracts per-satellite code, carrier, signal-strength, and loss-of-lock features, computes GPS broadcast-ephemeris pseudorange residuals, injects controlled observation-level spoofing windows, and reports precision, recall, F1 score, ROC AUC, false-alarm rate, and detection latency.
 On the current rover dataset, the RINEX extractor produces \RinexEpochCount{} epochs and \RinexSatelliteRowCount{} per-satellite observation rows, all of which are synchronized into the \DetectionRowCount{}-sample detection dataset.
-The first transparent baseline achieves recall \AttackRecall{} and ROC AUC \AttackRocAuc{} under synthetic spoofing, exposing the need for environment-adaptive gates and raw-observation residual tests in the next stage.
+The first transparent baseline achieves recall \AttackRecall{} and ROC AUC \AttackRocAuc{} under synthetic spoofing, while the raw residual layer provides \RawRaimCoverageRows{} synchronized RAIM-capable epochs for baseline and ablation studies.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -45,8 +45,9 @@ The current contributions are:
 \begin{itemize}
     \item a C++/Python experiment platform that links flight simulation, RINEX observations, RTKLIB products, FAST\_GLIO logs, and visualization;
     \item a RINEX feature extractor that outputs both per-satellite long-format observations and per-epoch summaries;
+    \item a GPS broadcast-ephemeris residual engine with weighted least-squares positioning, RAIM chi-square scoring, and reference-position pseudorange residuals;
     \item a synchronized detection dataset that merges raw observation quality, RTK/DOP, raw GNSS update diagnostics, and LiDAR--inertial consistency;
-    \item a first transparent baseline with reproducible metrics and figures.
+    \item an observation-level pseudorange attack injector and a first transparent baseline with reproducible metrics and figures.
 \end{itemize}
 
 \section{Related Work}
@@ -73,6 +74,9 @@ The detector consumes a single synchronized table that preserves raw GNSS qualit
 The RINEX parser reads the system-specific observation type declarations and decodes each satellite record into code, carrier, Doppler when present, C/N0, LLI, and SSI fields.
 It outputs a per-satellite table with one row per satellite per epoch and a per-epoch summary with satellite count, constellation coverage, observation counts, C/N0 statistics, inter-frequency code-difference RMS, and loss-of-lock counts.
 The current rover observation file contains an average of \RinexMeanSatellites{} satellites per epoch.
+For GPS observations, the platform also parses RINEX broadcast navigation records and computes satellite ECEF positions, satellite clock corrections, elevation/azimuth, pseudorange residuals, and weighted RAIM statistics.
+The RAIM baseline solves a GPS-only weighted least-squares position and receiver clock bias at each epoch, then evaluates the post-fit residual chi-square statistic.
+In parallel, a reference residual is computed with the RTKLIB ECEF trajectory to expose cross-source pseudorange consistency; its mean RMS over the synchronized run is \RawReferenceResidualMean{} m.
 
 Fig.~\ref{fig:rawobs} summarizes the raw observation stream.
 The rover RINEX file contains GPS, GLONASS, Galileo, BeiDou, QZSS, and IRNSS observations.
@@ -99,14 +103,17 @@ Each row includes the spoofing label, detector output, score components, RTK qua
 
 The baseline spoofing score is a weighted sum of normalized terms:
 \begin{equation}
-S =
-w_r S_r + w_m S_m + w_p S_p + w_a S_a + w_d S_d + w_q S_q ,
+\begin{split}
+S ={}& w_r S_r + w_m S_m + w_p S_p + w_a S_a \\
+&+ w_\rho S_\rho + w_c S_c + w_d S_d + w_q S_q ,
+\end{split}
 \end{equation}
-where $S_r$ is the LiDAR--GNSS residual score, $S_m$ is the Mahalanobis gate score, $S_p$ and $S_a$ are pseudorange RMS and maximum-residual scores, $S_d$ is the Doppler/TDCP score when available, and $S_q$ penalizes degraded RTK quality.
+where $S_r$ is the LiDAR--GNSS residual score, $S_m$ is the Mahalanobis gate score, $S_p$ and $S_a$ are receiver pseudorange RMS and maximum-residual scores, $S_\rho$ is the raw RAIM score, $S_c$ is the reference pseudorange residual score, $S_d$ is the Doppler/TDCP score when available, and $S_q$ penalizes degraded RTK quality.
 The detector triggers when $S$ exceeds a threshold and confirms spoofing after a configurable number of consecutive triggered samples.
 
 Fig.~\ref{fig:trajectory} shows the real RTK route and raw-observation availability.
 Fig.~\ref{fig:score} shows the synthetic spoofing interval and baseline score response.
+Fig.~\ref{fig:raim} shows the broadcast-ephemeris raw residual layer under the observation-level attack injector.
 
 \begin{figure}[!t]
     \centering
@@ -120,6 +127,13 @@ Fig.~\ref{fig:score} shows the synthetic spoofing interval and baseline score re
     \includegraphics[width=\linewidth]{spoof_score_timeline.png}
     \caption{Spoof-score timeline for the synthetic attack case. The baseline fixed threshold detects the attack but also produces false alarms in degraded clean intervals.}
     \label{fig:score}
+\end{figure}
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{raw_raim_timeline.png}
+    \caption{Raw GPS pseudorange residual timeline. The observation-level injector modifies satellite pseudoranges before the broadcast-ephemeris residual and RAIM statistics are recomputed.}
+    \label{fig:raim}
 \end{figure}
 
 \section{Preliminary Results}
@@ -157,8 +171,8 @@ Clean false alarms/min & \CleanFalseAlarmPerMinute{} \\
 \end{figure}
 
 \section{Next Steps Toward a Journal Paper}
-The next research stage should move from residual-level injection to raw-observation-level attack modeling.
-Specifically, we will estimate satellite geometry from navigation ephemerides, compute predicted pseudorange and Doppler/TDCP residuals, and implement RAIM-only, LiDAR--GNSS-only, raw-GNSS-only, and fused adaptive baselines.
+The next research stage should move from the current GPS-only raw residual baseline to multi-constellation residual modeling.
+Specifically, we will add Galileo and BeiDou broadcast ephemerides, ionosphere/troposphere correction options, Doppler/TDCP residuals, and RAIM-only, LiDAR--GNSS-only, raw-GNSS-only, and fused adaptive baselines.
 The main algorithmic opportunity is an environment-aware sequential detector that adapts thresholds using C/N0, DOP, constellation coverage, LIO quality, and RTK ambiguity indicators.
 This is also where the platform can turn the current false-alarm weakness into a publishable contribution.
 

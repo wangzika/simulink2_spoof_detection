@@ -193,6 +193,38 @@ def plot_raw_observation_summary(rinex_epoch: pd.DataFrame, output_dir: Path) ->
     savefig(output_dir / "raw_observation_summary.png")
 
 
+def plot_raw_raim_timeline(attack: pd.DataFrame, output_dir: Path) -> None:
+    required = {"raw_raim_score", "raw_reference_residual_rms_m", "raw_raim_detected"}
+    if not required.issubset(set(attack.columns)):
+        return
+    if float(pd.to_numeric(attack["raw_raim_used_satellite_count"], errors="coerce").fillna(0).max()) <= 0.0:
+        return
+    fig, ax = plt.subplots(figsize=(9.0, 3.9))
+    t = attack["time_s"]
+    raim_score = pd.to_numeric(attack["raw_raim_score"], errors="coerce").fillna(0.0)
+    reference_rms = pd.to_numeric(attack["raw_reference_residual_rms_m"], errors="coerce").fillna(0.0)
+    ax.plot(t, raim_score, color="#0b7285", linewidth=1.2, label="RAIM score")
+    ax.axhline(1.0, color="#d9480f", linestyle="--", linewidth=1.0, label="RAIM threshold")
+    attack_mask = attack["attack_label"] > 0
+    if attack_mask.any():
+        upper = max(1.2, float(raim_score.max()) * 1.08)
+        ax.fill_between(t, 0, upper, where=attack_mask, color="#ffd43b", alpha=0.25, label="Injected attack")
+    det = pd.to_numeric(attack["raw_raim_detected"], errors="coerce").fillna(0) > 0
+    if det.any():
+        ax.scatter(t[det], raim_score[det], s=13, color="#c92a2a", label="RAIM detections", zorder=3)
+    ax.set_xlabel("Experiment time (s)")
+    ax.set_ylabel("RAIM score")
+    ax2 = ax.twinx()
+    ax2.plot(t, reference_rms, color="#5f3dc4", linewidth=1.0, alpha=0.72, label="Reference residual RMS")
+    ax2.set_ylabel("Reference RMS (m)")
+    lines, labels = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines + lines2, labels + labels2, loc="upper right", fontsize=8)
+    ax.set_title("Broadcast-ephemeris raw pseudorange residuals")
+    ax.grid(True, alpha=0.25)
+    savefig(output_dir / "raw_raim_timeline.png")
+
+
 def compute_sweep(df: pd.DataFrame):
     labels = (df["attack_label"].to_numpy() >= 0.5).astype(int)
     scores = df["spoof_score"].to_numpy(dtype=float)
@@ -256,6 +288,9 @@ def write_metrics_tex(
 ) -> None:
     best_f1 = attack_metrics.get("threshold_sweep", {}).get("best_f1", {})
     latency = attack_metrics.get("detection_latency_s", {})
+    raw_raim_coverage = int((pd.to_numeric(attack.get("raw_raim_used_satellite_count", pd.Series(dtype=float)), errors="coerce").fillna(0) > 0).sum())
+    raw_raim_detected = int((pd.to_numeric(attack.get("raw_raim_detected", pd.Series(dtype=float)), errors="coerce").fillna(0) > 0).sum())
+    raw_reference_mean = float(pd.to_numeric(attack.get("raw_reference_residual_rms_m", pd.Series(dtype=float)), errors="coerce").fillna(0).mean())
     rows = [
         macro("RinexEpochCount", f"{int(rinex_summary['epochs'])}"),
         macro("RinexSatelliteRowCount", f"{int(rinex_summary['satellite_rows'])}"),
@@ -272,6 +307,9 @@ def write_metrics_tex(
         macro("BestFoneScore", f"{float(best_f1.get('f1', 0.0)):.3f}"),
         macro("CleanFalseAlarmPerMinute", f"{clean_metrics['false_alarm_per_min']:.3f}"),
         macro("RinexMeanSatellites", f"{float(rinex_summary['satellite_count']['mean']):.2f}"),
+        macro("RawRaimCoverageRows", f"{raw_raim_coverage}"),
+        macro("RawRaimDetectedRows", f"{raw_raim_detected}"),
+        macro("RawReferenceResidualMean", f"{raw_reference_mean:.3f}"),
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(rows), encoding="utf-8")
@@ -298,6 +336,7 @@ def main() -> int:
     plot_trajectory_quality(attack, output_dir)
     plot_spoof_score(attack, attack_metrics, output_dir)
     plot_raw_observation_summary(rinex_epoch, output_dir)
+    plot_raw_raim_timeline(attack, output_dir)
     plot_threshold_calibration(attack, output_dir)
     plot_constellation_distribution(rinex_summary, output_dir)
     write_metrics_tex(metrics_tex, attack, attack_metrics, clean_metrics, rinex_summary)
