@@ -12,6 +12,9 @@
 - RINEX 每历元汇总特征合入检测数据集：卫星数、系统数、观测数、C/N0 统计、低 C/N0 卫星数、码间差 RMS、周跳计数。
 - GPS 广播星历原始伪距残差：解析 RINEX navigation，计算 GPS 卫星 ECEF、卫星钟差、仰角/方位角、GNSS-only WLS 后验 RAIM 残差，以及 RTK 参考位置伪距残差。
 - 观测级攻击注入：直接改写 per-satellite CSV 中的 `primary_code_m`，保留 `clean_primary_code_m`、`injected_pseudorange_bias_m`、攻击标签和 scale。
+- 环境自适应序贯 GLRT：融合 raw GNSS residual、receiver pseudorange GLRT、LiDAR--GNSS residual、DOP/C/N0/RTK ratio/satellite count 环境质量，输出 adaptive threshold、CUSUM、confidence 和攻击类型。
+- 实验矩阵：clean real data、degraded non-attack data、80 个 synthetic spoofing case，覆盖 1/2/5/10 m 强度、1/5/20/60 s ramp、position bias/pseudorange delay/single-satellite outlier/coordinated spoof/slow drift 五类攻击。
+- Baseline/ablation：RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、fixed fused、adaptive fused、EA-SGLRT、no raw、no LIO、no environment、no CUSUM。
 - GPS week/TOW 到 Unix 时间的转换，默认 GPST-UTC = 18 s。
 - 合成欺骗窗口注入：位置残差偏移、伪距延迟、ramp-in/ramp-out。
 - 基线检测分数：LiDAR/IMU-GNSS 残差、Mahalanobis gate、伪距 RMS/最大残差、Doppler/TDCP、RTK 质量。
@@ -92,6 +95,7 @@ cmake --build build --target paper_dataset_attack
 cmake --build build --target paper_eval_attack
 cmake --build build --target paper_eval_clean
 cmake --build build --target paper_pipeline
+cmake --build build --target adaptive_experiments
 cmake --build build --target paper_figures
 cmake --build build --target paper_pdf
 ```
@@ -113,31 +117,33 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 - 已输出 per-epoch summary CSV，并合入检测数据集。
 - 已输出 raw GPS per-satellite residual CSV 和 per-epoch RAIM/reference residual CSV。
 - 已通过 `raw_residuals_smoke` 自包含测试：clean RAIM 分数低，观测级单星攻击后 RAIM 分数升高。
+- 已通过 `adaptive_detector_smoke` 自包含测试：持续攻击可检出，环境自适应相对无环境版本降低误报。
 - 待完成：多星座 Galileo/BDS 广播星历、ionosphere/troposphere correction、Doppler/TDCP、单差/双差、robust weighting 与 `gnss_raw_update_log.csv` 的 PR RMS/healthy count/outlier count 定量趋势匹配。
 
 ## Phase 3: 可发表检测算法
 
-建议主线：
+当前主线已经实现第一版：
 
-- Raw GNSS consistency: RAIM/pseudorange/Doppler/TDCP。
+- Raw GNSS consistency: RAIM/reference pseudorange residual。
 - Cross-modal consistency: LiDAR/IMU odometry vs GNSS。
-- Environment-aware gating: 使用 LIO quality、urban canyon score、DOP、satellite count 自适应调阈值。
-- Sequential decision: CUSUM/GLRT/finite-state confirmation，输出检测时延和误报率。
+- Environment-aware gating: 使用 C/N0、DOP、RTK ratio、satellite count、raw coverage、alignment quality 自适应调阈值。
+- Sequential decision: CUSUM/GLRT confirmation，输出 confidence、检测时延、误报率和 attack type。
 
 验收标准：
 
-- 干净数据低误报。
-- 合成攻击高召回、低时延。
-- 至少包含固定阈值、RAIM-only、LIO-GNSS-only、融合算法四个 baseline/ablation。
+- 当前矩阵中 EA-SGLRT 在 82 场景上取得 mean attack F1 高于 fixed fused，同时 mean false alarms/min 更低。
+- 已包含固定阈值、RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
+- 下一步要把 degraded non-attack 从合成降质扩展为真实 urban/open-sky 分段，并补充统计显著性检验。
 
 ## Phase 4: 论文实验矩阵
 
 需要完成的实验：
 
 - 不同攻击幅值：1 m、2 m、5 m、10 m、渐进 ramp。
-- 不同攻击类型：位置偏移、伪距公共延迟、卫星子集偏置、慢漂移。
-- 不同环境/质量：open sky、遮挡、urban canyon 或人为降质片段。
-- 消融：去掉 Doppler、去掉 LIO consistency、去掉 adaptive gate。
+- 不同 ramp：1 s、5 s、20 s、60 s。
+- 不同攻击类型：位置偏移、伪距公共延迟、单星 outlier、协同欺骗、慢漂移。
+- 不同环境/质量：clean real、degraded non-attack；待补真实 open sky、遮挡、urban canyon 分段。
+- 消融：去掉 raw GNSS、去掉 LIO consistency、去掉 adaptive gate、去掉 CUSUM。
 - 鲁棒性：采样率、时间同步误差、GNSS 中断、RTK fixed/float 状态切换。
 
 ## Phase 5: 论文初稿和投稿材料

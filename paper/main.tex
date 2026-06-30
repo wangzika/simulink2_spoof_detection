@@ -11,7 +11,7 @@
 
 \input{generated_metrics.tex}
 
-\title{Toward Robust GNSS Spoofing Detection with Raw Observation and LiDAR--Inertial Consistency}
+\title{Environment-Adaptive Sequential GLRT for GNSS Spoofing Detection Using Raw Observations and LiDAR--Inertial Consistency}
 
 \author{Zhibo Wang%
 \thanks{This draft is generated from the reproducible C++/Python GNSS spoof-detection platform in this repository.}}
@@ -20,166 +20,170 @@
 \maketitle
 
 \begin{abstract}
-GNSS spoofing can induce hazardous navigation errors while preserving apparently plausible satellite measurements.
-This paper presents a reproducible spoofing-detection platform that combines raw RINEX observation features, RTKLIB solution products, and LiDAR--inertial consistency diagnostics from FAST\_GLIO.
-The platform converts GPS time and Unix time onto a common axis, extracts per-satellite code, carrier, signal-strength, and loss-of-lock features, computes GPS broadcast-ephemeris pseudorange residuals, injects controlled observation-level spoofing windows, and reports precision, recall, F1 score, ROC AUC, false-alarm rate, and detection latency.
-On the current rover dataset, the RINEX extractor produces \RinexEpochCount{} epochs and \RinexSatelliteRowCount{} per-satellite observation rows, all of which are synchronized into the \DetectionRowCount{}-sample detection dataset.
-The first transparent baseline achieves recall \AttackRecall{} and ROC AUC \AttackRocAuc{} under synthetic spoofing, while the raw residual layer provides \RawRaimCoverageRows{} synchronized RAIM-capable epochs for baseline and ablation studies.
+GNSS spoofing can bias navigation solutions while preserving plausible receiver outputs.
+Fixed-threshold residual monitors are attractive because they are transparent, but they often confuse spoofing with benign degradation caused by low C/N0, poor geometry, RTK ambiguity changes, and LiDAR--inertial alignment transients.
+This paper proposes an environment-adaptive sequential generalized likelihood ratio test (EA-SGLRT) that combines raw pseudorange consistency, receiver pseudorange diagnostics, and LiDAR--GNSS residuals under a threshold adapted by C/N0, DOP, satellite count, RTK ratio, and alignment quality.
+The detector accumulates multi-cue evidence with a CUSUM-style statistic and outputs confidence and anomaly type.
+On a reproducible \MatrixScenarioCount{}-scenario matrix built from a real rover dataset, including clean data, degraded non-attack data, and \MatrixAttackScenarioCount{} synthetic spoofing cases, EA-SGLRT improves mean attack F1 to \AdaptiveSeqFone{} versus \FixedFusedMatrixFone{} for the fixed fused baseline, while reducing mean false alarms from \FixedFusedMatrixFalseAlarm{} to \AdaptiveSeqFalseAlarm{} alarms/min.
 \end{abstract}
 
 \begin{IEEEkeywords}
-GNSS spoofing detection, RINEX, LiDAR--inertial odometry, RTKLIB, FAST\_GLIO, raw observation consistency.
+GNSS spoofing detection, sequential GLRT, RAIM, RINEX, LiDAR--inertial odometry, adaptive thresholding.
 \end{IEEEkeywords}
 
 \section{Introduction}
-Civil GNSS receivers are widely used in robotic, aerial, and ground navigation systems.
-Their open signal structure, however, makes them vulnerable to spoofing attacks that can bias the estimated position without immediately causing signal loss.
-Classical receiver-side residual tests can detect abrupt faults, but benign degradation caused by multipath, occlusion, and poor satellite geometry can look similar to adversarial behavior.
-This motivates a multi-source detection strategy that compares raw GNSS consistency with an independent LiDAR--inertial motion estimate.
+GNSS receivers are vulnerable to spoofing attacks that gradually or abruptly bias the navigation solution.
+Measurement-level monitors such as RAIM and innovation tests are deployable without RF front-end modifications, yet their operating point is strongly affected by environmental quality.
+Urban canyon multipath, weak signals, poor DOP, and RTK ambiguity changes can produce residuals that resemble spoofing.
+This is the central gap addressed here: a detector should become cautious under benign degradation without becoming blind to coordinated spoofing.
 
-This paper develops a reproducible platform for GNSS spoofing studies.
-Rather than treating post-fusion trajectory errors as the only signal, the platform preserves raw observation features, RTK quality indicators, DOP values, pseudorange residual diagnostics, and LiDAR--GNSS consistency residuals.
-The long-term objective is a publishable detector that separates spoofing from ordinary degradation with low false-alarm rate and short detection latency.
+We develop a reproducible method and platform for this problem.
+The platform extracts RINEX raw observations, parses GPS broadcast ephemerides, computes pseudorange residuals and RAIM statistics, aligns RTKLIB and FAST\_GLIO diagnostics, and evaluates detectors over controlled spoofing and degradation scenarios.
+The method, EA-SGLRT, turns these synchronized streams into environment-normalized evidence and applies sequential confirmation.
 
-The current contributions are:
+The contributions are:
 \begin{itemize}
-    \item a C++/Python experiment platform that links flight simulation, RINEX observations, RTKLIB products, FAST\_GLIO logs, and visualization;
-    \item a RINEX feature extractor that outputs both per-satellite long-format observations and per-epoch summaries;
-    \item a GPS broadcast-ephemeris residual engine with weighted least-squares positioning, RAIM chi-square scoring, and reference-position pseudorange residuals;
-    \item a synchronized detection dataset that merges raw observation quality, RTK/DOP, raw GNSS update diagnostics, and LiDAR--inertial consistency;
-    \item an observation-level pseudorange attack injector and a first transparent baseline with reproducible metrics and figures.
+    \item an environment-adaptive sequential GLRT that jointly uses raw GNSS residuals, receiver pseudorange diagnostics, and LiDAR--inertial consistency;
+    \item a GPS broadcast-ephemeris residual engine with weighted least-squares positioning, RAIM chi-square statistics, and RTK-reference pseudorange residuals;
+    \item an observation-level pseudorange attack injector and an \MatrixScenarioCount{}-scenario experiment matrix covering clean, degraded, and synthetic spoofing cases;
+    \item reproducible comparisons against RAIM-only, pseudorange-GLRT-only, LiDAR--GNSS-only, fixed fused, adaptive non-sequential, and sensor-ablation baselines.
 \end{itemize}
 
 \section{Related Work}
-GNSS spoofing detection methods can be broadly grouped into signal-level monitoring, measurement-level residual tests, navigation filter innovation tests, and cross-modal consistency checks.
-Signal-level approaches can be powerful but often require tracking-channel access or specialized antennas.
-Measurement-level approaches such as RAIM and GLRT are deployable on receiver outputs, but they can be sensitive to multipath and satellite geometry.
-Cross-modal approaches compare GNSS with inertial, visual, LiDAR, wheel odometry, or map constraints.
-This work focuses on a deployable measurement/navigation-layer platform that uses RINEX raw observations~\cite{rinex304}, RTKLIB products~\cite{rtklib}, and LiDAR--inertial consistency inspired by FAST-LIO2~\cite{fastlio2} without custom RF hardware.
+GNSS spoofing detection methods include signal-level authentication, multi-antenna angle checks, measurement-level residual tests, navigation-filter innovation monitoring, and cross-modal consistency checks.
+Signal-level methods can be powerful but often require receiver internals or specialized hardware.
+Measurement-level RAIM and GLRT are transparent and receiver-output compatible, but they are sensitive to geometry and multipath.
+Cross-modal methods compare GNSS with inertial, visual, LiDAR, or map constraints, but naive fixed thresholds can overreact to non-attack degradation.
+This work focuses on a deployable measurement/navigation-layer detector using RINEX observations~\cite{rinex304}, RTKLIB products~\cite{rtklib}, and LiDAR--inertial diagnostics inspired by FAST-LIO2~\cite{fastlio2}.
 
-\section{System Overview}
-Fig.~\ref{fig:architecture} shows the implemented pipeline.
-The platform ingests RINEX observation files, RTKLIB solution products, FAST\_GLIO fusion diagnostics, and C++ simulator outputs.
-All data streams are aligned to Unix time, with GPS time converted using an explicit GPST--UTC offset.
-The detector consumes a single synchronized table that preserves raw GNSS quality, RTK quality, DOP, pseudorange residual statistics, and LiDAR--GNSS residuals.
+\section{System and Features}
+Fig.~\ref{fig:architecture} summarizes the pipeline.
+RINEX rover observations are decoded into code, carrier, C/N0, LLI, and SSI features.
+For GPS satellites, broadcast navigation records are parsed to compute satellite ECEF position, satellite clock correction, elevation, azimuth, and predicted pseudorange.
+At each epoch, a weighted least-squares GNSS-only solution estimates receiver position and clock bias; the post-fit residual chi-square forms the RAIM cue.
+A second raw cue compares measured pseudoranges with the RTKLIB ECEF reference after estimating a receiver clock offset.
 
 \begin{figure}[!t]
     \centering
     \includegraphics[width=\linewidth]{system_architecture.png}
-    \caption{Reproducible platform architecture. RINEX, RTKLIB, and FAST\_GLIO products are synchronized before multi-cue spoof scoring and evaluation.}
+    \caption{Reproducible detection pipeline linking RINEX observations, RTKLIB products, FAST\_GLIO logs, raw residuals, adaptive detection, and evaluation.}
     \label{fig:architecture}
 \end{figure}
 
-\section{Raw Observation Feature Extraction}
-The RINEX parser reads the system-specific observation type declarations and decodes each satellite record into code, carrier, Doppler when present, C/N0, LLI, and SSI fields.
-It outputs a per-satellite table with one row per satellite per epoch and a per-epoch summary with satellite count, constellation coverage, observation counts, C/N0 statistics, inter-frequency code-difference RMS, and loss-of-lock counts.
-The current rover observation file contains an average of \RinexMeanSatellites{} satellites per epoch.
-For GPS observations, the platform also parses RINEX broadcast navigation records and computes satellite ECEF positions, satellite clock corrections, elevation/azimuth, pseudorange residuals, and weighted RAIM statistics.
-The RAIM baseline solves a GPS-only weighted least-squares position and receiver clock bias at each epoch, then evaluates the post-fit residual chi-square statistic.
-In parallel, a reference residual is computed with the RTKLIB ECEF trajectory to expose cross-source pseudorange consistency; its mean RMS over the synchronized run is \RawReferenceResidualMean{} m.
-
-Fig.~\ref{fig:rawobs} summarizes the raw observation stream.
-The rover RINEX file contains GPS, GLONASS, Galileo, BeiDou, QZSS, and IRNSS observations.
-The current rover file does not expose Doppler observation types, so Doppler/TDCP residuals remain a next-step feature for the rover stream; the extraction code supports Doppler fields when present, as in the base observation file.
+The current rover file contains \RinexEpochCount{} epochs and \RinexSatelliteRowCount{} per-satellite observation rows, with \RinexMeanSatellites{} satellites per epoch on average.
+The synchronized detection table contains \DetectionRowCount{} samples.
+The raw residual layer contributes \RawRaimCoverageRows{} synchronized RAIM-capable samples in the FAST\_GLIO overlap interval.
 
 \begin{figure}[!t]
     \centering
     \includegraphics[width=\linewidth]{raw_observation_summary.png}
-    \caption{RINEX raw-observation summary: satellite count, mean C/N0, and inter-frequency code-difference RMS over the rover observation interval.}
+    \caption{Raw observation quality over the rover interval: satellite count, mean C/N0, and inter-frequency code-difference RMS.}
     \label{fig:rawobs}
 \end{figure}
 
-\begin{figure}[!t]
-    \centering
-    \includegraphics[width=\linewidth]{constellation_distribution.png}
-    \caption{Constellation distribution in the rover RINEX file, counted over per-satellite observation rows.}
-    \label{fig:constellation}
-\end{figure}
-
-\section{Detection Dataset and Baseline}
-The synchronized detection table currently contains \DetectionRowCount{} samples.
-The RINEX epoch summary covers \RinexCoverageRows{} of these samples.
-Each row includes the spoofing label, detector output, score components, RTK quality, DOP, FAST\_GLIO raw pseudorange diagnostics, LiDAR--GNSS residuals, and RINEX raw-observation summaries.
-
-The baseline spoofing score is a weighted sum of normalized terms:
+\section{Method}
+Let $z_t$ denote the synchronized feature vector at epoch $t$.
+EA-SGLRT first computes normalized cue scores: LiDAR--GNSS residual score $S_L$, receiver pseudorange score $S_P$, raw GNSS score $S_R$, Doppler/TDCP score $S_D$ when present, and RTK-quality score $S_Q$.
+The raw score is the maximum of the GPS RAIM chi-square ratio and the RTK-reference pseudorange RMS ratio.
+The instantaneous fused evidence is
 \begin{equation}
-\begin{split}
-S ={}& w_r S_r + w_m S_m + w_p S_p + w_a S_a \\
-&+ w_\rho S_\rho + w_c S_c + w_d S_d + w_q S_q ,
-\end{split}
+G_t=w_L S_L+w_P S_P+w_R S_R+w_D S_D+w_Q S_Q .
 \end{equation}
-where $S_r$ is the LiDAR--GNSS residual score, $S_m$ is the Mahalanobis gate score, $S_p$ and $S_a$ are receiver pseudorange RMS and maximum-residual scores, $S_\rho$ is the raw RAIM score, $S_c$ is the reference pseudorange residual score, $S_d$ is the Doppler/TDCP score when available, and $S_q$ penalizes degraded RTK quality.
-The detector triggers when $S$ exceeds a threshold and confirms spoofing after a configurable number of consecutive triggered samples.
 
-Fig.~\ref{fig:trajectory} shows the real RTK route and raw-observation availability.
-Fig.~\ref{fig:score} shows the synthetic spoofing interval and baseline score response.
-Fig.~\ref{fig:raim} shows the broadcast-ephemeris raw residual layer under the observation-level attack injector.
+The threshold is adapted with an environment degradation index $E_t$:
+\begin{equation}
+\tau_t=\tau_0\left(1+\alpha E_t+\beta I_{\mathrm{raw\ missing}}\right),
+\end{equation}
+where $E_t$ is a weighted combination of low C/N0, high DOP, low satellite count, low RTK ratio, poor RTK status, low healthy-pseudorange count, and rejected pseudorange outliers.
+The missing-raw term prevents LiDAR-only excursions from accumulating strong spoofing evidence when broadcast-ephemeris residuals are unavailable.
+
+Sequential confirmation is performed with a CUSUM-style statistic:
+\begin{equation}
+C_t=\max\left(0,C_{t-1}+\max\left(0,\frac{G_t}{\tau_t}-\eta\right)-\gamma-\lambda E_t\right),
+\end{equation}
+and spoofing is declared when $C_t>h$.
+The detector also reports confidence
+\begin{equation}
+p_t=\sigma\left(k\left(\frac{C_t}{h}-0.72\right)\right),
+\end{equation}
+and assigns an anomaly type by the dominant cue: raw-observation outlier, pseudorange bias, LiDAR--GNSS inconsistency, coordinated spoofing, or benign degradation.
+Fig.~\ref{fig:cusum} shows the resulting score, adaptive threshold, CUSUM, confidence, and degradation index for a representative attack.
 
 \begin{figure}[!t]
     \centering
-    \includegraphics[width=\linewidth]{trajectory_quality.png}
-    \caption{RTK trajectory and synchronized RINEX observation availability.}
-    \label{fig:trajectory}
+    \includegraphics[width=\linewidth]{adaptive_cusum_timeline.png}
+    \caption{EA-SGLRT timeline for a representative coordinated spoofing scenario. The adaptive threshold rises under degraded conditions, while persistent multi-cue evidence is accumulated by CUSUM.}
+    \label{fig:cusum}
 \end{figure}
 
-\begin{figure}[!t]
-    \centering
-    \includegraphics[width=\linewidth]{spoof_score_timeline.png}
-    \caption{Spoof-score timeline for the synthetic attack case. The baseline fixed threshold detects the attack but also produces false alarms in degraded clean intervals.}
-    \label{fig:score}
-\end{figure}
+\section{Experiments}
+The experiment matrix contains clean real data, degraded non-attack data, and synthetic spoofing generated from the synchronized real dataset.
+Spoofing cases vary attack strength at 1, 2, 5, and 10 m; ramp time at 1, 5, 20, and 60 s; and attack type across position bias, pseudorange delay, single-satellite outlier, coordinated spoofing, and slow drift.
+The degraded non-attack case lowers C/N0, worsens DOP, reduces RTK ratio and satellite availability, and increases moderate multipath-like pseudorange scatter without changing the spoofing label.
+This design tests whether a detector separates adversarial consistency violations from ordinary quality degradation.
 
-\begin{figure}[!t]
-    \centering
-    \includegraphics[width=\linewidth]{raw_raim_timeline.png}
-    \caption{Raw GPS pseudorange residual timeline. The observation-level injector modifies satellite pseudoranges before the broadcast-ephemeris residual and RAIM statistics are recomputed.}
-    \label{fig:raim}
-\end{figure}
-
-\section{Preliminary Results}
-Table~\ref{tab:metrics} reports the current baseline on the synthetic spoofing run.
-The fixed-threshold detector reaches high recall but low precision, which confirms that static thresholds are too sensitive for this dataset.
-Threshold calibration improves F1 from \AttackFone{} to \BestFoneScore{}, with threshold \BestFoneThreshold{}.
+We compare EA-SGLRT with RAIM-only, pseudorange GLRT-only, LiDAR--GNSS residual-only, fixed-threshold fused detection, adaptive non-sequential fused detection, and ablations that remove raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM.
+For statistical comparison, each synthetic attack scenario is treated as a paired trial between EA-SGLRT and the fixed fused detector.
+EA-SGLRT improves F1 by \AdaptiveVsFixedFoneGain{} on average, with bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}] and sign-test $p=\AdaptiveVsFixedPvalue{}$.
 
 \begin{table}[!t]
 \centering
-\caption{Preliminary synthetic-spoofing metrics.}
-\label{tab:metrics}
-\begin{tabular}{lc}
+\caption{Detector comparison over the \MatrixScenarioCount{}-scenario matrix.}
+\label{tab:matrix}
+\begin{tabular}{lccc}
 \toprule
-Metric & Value \\
+Detector & F1 & Recall & FA/min \\
 \midrule
-Fixed-threshold precision & \AttackPrecision{} \\
-Fixed-threshold recall & \AttackRecall{} \\
-Fixed-threshold F1 & \AttackFone{} \\
-ROC AUC & \AttackRocAuc{} \\
-Mean detection latency (s) & \AttackLatencyMean{} \\
-Best-F1 threshold & \BestFoneThreshold{} \\
-Best-F1 precision & \BestFonePrecision{} \\
-Best-F1 recall & \BestFoneRecall{} \\
-Best-F1 score & \BestFoneScore{} \\
-Clean false alarms/min & \CleanFalseAlarmPerMinute{} \\
+RAIM only & \RaimOnlyFone{} & -- & 0.000 \\
+Pseudorange GLRT & \PseudorangeGlrtFone{} & -- & -- \\
+LiDAR--GNSS residual & \LioResidualFone{} & -- & -- \\
+Fixed fused & \FixedFusedMatrixFone{} & -- & \FixedFusedMatrixFalseAlarm{} \\
+EA-SGLRT & \AdaptiveSeqFone{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFalseAlarm{} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{figure}[!t]
     \centering
-    \includegraphics[width=\linewidth]{threshold_calibration.png}
-    \caption{Threshold calibration for the synthetic spoofing run. The current fixed threshold is intentionally transparent but not yet publication quality.}
-    \label{fig:threshold}
+    \includegraphics[width=\linewidth]{adaptive_baseline_comparison.png}
+    \caption{Baseline comparison. EA-SGLRT improves attack F1 while reducing mean false alarms relative to the fixed fused detector.}
+    \label{fig:baseline}
 \end{figure}
 
-\section{Next Steps Toward a Journal Paper}
-The next research stage should move from the current GPS-only raw residual baseline to multi-constellation residual modeling.
-Specifically, we will add Galileo and BeiDou broadcast ephemerides, ionosphere/troposphere correction options, Doppler/TDCP residuals, and RAIM-only, LiDAR--GNSS-only, raw-GNSS-only, and fused adaptive baselines.
-The main algorithmic opportunity is an environment-aware sequential detector that adapts thresholds using C/N0, DOP, constellation coverage, LIO quality, and RTK ambiguity indicators.
-This is also where the platform can turn the current false-alarm weakness into a publishable contribution.
+Fig.~\ref{fig:heatmap} summarizes performance across attack strength and ramp duration.
+As expected, low-amplitude and slow-ramp attacks are hardest because their residuals remain comparable to benign motion and multipath.
+The sequential detector improves stability by accumulating weak evidence, but the results still expose the need for longer real overlap sequences and multi-constellation raw residuals.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{attack_matrix_heatmap.png}
+    \caption{EA-SGLRT F1 over attack strength and ramp duration, averaged over attack types.}
+    \label{fig:heatmap}
+\end{figure}
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{ablation_comparison.png}
+    \caption{Ablation study. Removing raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM reduces the mean attack F1.}
+    \label{fig:ablation}
+\end{figure}
+
+\section{Discussion}
+EA-SGLRT improves over fixed fusion because it changes the decision problem from a single residual threshold to persistent, environment-normalized evidence.
+When C/N0 is low, DOP is poor, or RTK ambiguity quality is weak, the detector raises the effective threshold and prevents short LiDAR--GNSS residual bursts from becoming spoofing declarations.
+When raw pseudorange residuals and LiDAR--GNSS residuals rise together, evidence accumulates quickly.
+The ablation in Fig.~\ref{fig:ablation} shows that raw GNSS and LiDAR consistency are complementary: removing either reduces F1, and removing environment adaptation produces many false alarms in degraded intervals.
+
+\section{Limitations}
+The current raw residual engine is GPS-only, and the rover RINEX stream does not expose Doppler observations, so Doppler/TDCP is not yet fully exploited.
+The raw residual overlap with FAST\_GLIO is limited to \RawRaimCoverageRows{} synchronized samples; longer synchronized sequences are needed for final statistical claims.
+The spoofing experiments are synthetic rather than collected from a live RF spoofing campaign.
+They are still useful because the injector modifies observation-level pseudoranges and post-fusion residuals in controlled ways, but a journal submission should validate the final detector on additional open-sky, urban, and real or replayed spoofing datasets.
 
 \section{Conclusion}
-This draft presents a reproducible GNSS spoofing-detection platform with raw RINEX observation features and LiDAR--inertial consistency diagnostics.
-The first experimental figures and metrics are generated directly from the repository pipeline.
-The results show that the data path is now ready for raw residual modeling, adaptive gating, and systematic ablation studies.
+This paper converts the previous platform draft into a method-oriented detector: an environment-adaptive sequential GLRT that fuses raw GNSS and LiDAR--inertial consistency.
+The implementation is fully reproducible from the repository targets, generates a multi-scenario experiment matrix, and shows improved F1 and reduced false alarms compared with fixed-threshold fusion.
+The next research step is multi-constellation raw residual modeling and validation on longer degraded and spoofed field sequences.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

@@ -244,12 +244,22 @@ if (Python3_EXECUTABLE)
         add_custom_target(paper_pipeline
             DEPENDS paper_eval_clean paper_eval_attack
         )
+        add_custom_target(adaptive_experiments
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/run_experiment_matrix.py
+                --base-csv ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean/full_data_clean_detection.csv
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/adaptive_experiments
+            DEPENDS paper_dataset
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Run adaptive sequential GLRT experiment matrix and baseline ablations"
+            VERBATIM
+        )
         add_custom_target(paper_figures
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_paper_figures.py
                 --output-dir ${CMAKE_CURRENT_SOURCE_DIR}/paper/figures
                 --metrics-tex ${CMAKE_CURRENT_SOURCE_DIR}/paper/generated_metrics.tex
-            DEPENDS paper_pipeline
+            DEPENDS paper_pipeline adaptive_experiments
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Generate LaTeX paper figures from experiment outputs"
             VERBATIM
@@ -344,6 +354,11 @@ if (BUILD_TESTING)
         add_test(
             NAME raw_residuals_smoke
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_raw_residuals.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        add_test(
+            NAME adaptive_detector_smoke
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_adaptive_detector.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

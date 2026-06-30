@@ -183,8 +183,10 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 - `tools/extract_rinex_features.py` extracts RINEX per-satellite raw observation features and per-epoch summaries.
 - `tools/compute_raw_gnss_residuals.py` parses GPS broadcast ephemerides, computes raw pseudorange residuals, and writes RAIM/reference residual summaries.
 - `tools/inject_observation_attack.py` injects reproducible observation-level pseudorange attacks into per-satellite RINEX feature CSVs.
+- `tools/adaptive_sequential_detector.py` implements the Environment-Adaptive Sequential GLRT detector and the baseline/ablation detectors.
+- `tools/run_experiment_matrix.py` generates clean, degraded non-attack, multi-strength, multi-ramp, multi-type spoofing experiments and summarizes baseline comparisons.
 - `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
-- `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, and `tools/smoke_raw_residuals.py` are self-contained CTest smoke tests.
+- `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, `tools/smoke_raw_residuals.py`, and `tools/smoke_adaptive_detector.py` are self-contained CTest smoke tests.
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
 - `docs/paper_draft.md` contains the initial paper draft skeleton.
 
@@ -194,11 +196,12 @@ Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO 
 cmake --build build --target paper_pipeline
 ```
 
-Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, and `paper_eval_attack`.
+Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, `paper_eval_attack`, and `adaptive_experiments`.
 
 Generate the LaTeX figures and PDF draft:
 
 ```bash
+cmake --build build --target adaptive_experiments
 cmake --build build --target paper_figures
 cmake --build build --target paper_pdf
 ```
@@ -276,6 +279,23 @@ python tools/build_detection_dataset.py \
 
 python tools/evaluate_detection.py \
   build/paper_platform/full_data_attack/full_data_attack_detection.csv
+```
+
+Run the method-paper adaptive detector matrix directly:
+
+```bash
+python tools/run_experiment_matrix.py \
+  --base-csv build/paper_platform/full_data_clean/full_data_clean_detection.csv \
+  --output-dir build/paper_platform/adaptive_experiments
+```
+
+This writes detector comparisons and ablations:
+
+```text
+build/paper_platform/adaptive_experiments/matrix_results.csv
+build/paper_platform/adaptive_experiments/detector_summary.csv
+build/paper_platform/adaptive_experiments/scenario_summary.csv
+build/paper_platform/adaptive_experiments/adaptive_timeline.csv
 ```
 
 ## ImGui Desktop UI
