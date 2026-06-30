@@ -62,6 +62,9 @@ if (Python3_EXECUTABLE)
     )
     set(FULL_DATA_RTKLIB_POS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rtklib.pos")
     set(FULL_DATA_DOP "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/dop.txt")
+    set(FULL_DATA_ROVER_OBS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rover.obs")
+    set(PAPER_RINEX_SUMMARY_ARGS)
+    set(PAPER_RINEX_DEPS)
     if (EXISTS "${FULL_DATA_RTKLIB_POS}")
         add_custom_target(adapt_full_data
             COMMAND ${Python3_EXECUTABLE}
@@ -89,6 +92,22 @@ if (Python3_EXECUTABLE)
             VERBATIM
         )
     endif()
+    if (EXISTS "${FULL_DATA_ROVER_OBS}")
+        set(FULL_DATA_RINEX_EPOCH_SUMMARY
+            "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv")
+        set(PAPER_RINEX_SUMMARY_ARGS --rinex-summary ${FULL_DATA_RINEX_EPOCH_SUMMARY})
+        set(PAPER_RINEX_DEPS rinex_features)
+        add_custom_target(rinex_features
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/extract_rinex_features.py
+                --obs ${FULL_DATA_ROVER_OBS}
+                --name full_data_rover
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Extract per-satellite RINEX observation features from rover.obs"
+            VERBATIM
+        )
+    endif()
 
     set(FAST_GLIO_LOG_DIR "$ENV{FAST_GLIO_LOG_DIR}")
     if ("${FAST_GLIO_LOG_DIR}" STREQUAL "")
@@ -106,8 +125,10 @@ if (Python3_EXECUTABLE)
                 --loose ${FAST_GLIO_LOOSE}
                 --raw ${FAST_GLIO_RAW}
                 --tight ${FAST_GLIO_TIGHT}
+                ${PAPER_RINEX_SUMMARY_ARGS}
                 --name full_data_clean
                 --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean
+            DEPENDS ${PAPER_RINEX_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Build the clean paper detection dataset from full_data and FAST_GLIO logs"
             VERBATIM
@@ -120,11 +141,13 @@ if (Python3_EXECUTABLE)
                 --loose ${FAST_GLIO_LOOSE}
                 --raw ${FAST_GLIO_RAW}
                 --tight ${FAST_GLIO_TIGHT}
+                ${PAPER_RINEX_SUMMARY_ARGS}
                 --name full_data_attack
                 --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_attack
                 --attack-window +180:+260
                 --attack-offset 8.0,-3.0,0.5
                 --pseudorange-delay 18.0
+            DEPENDS ${PAPER_RINEX_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Build a synthetic spoofing dataset for detector evaluation"
             VERBATIM
@@ -218,6 +241,11 @@ if (BUILD_TESTING)
         add_test(
             NAME paper_pipeline_smoke
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_paper_pipeline.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        add_test(
+            NAME rinex_features_smoke
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_rinex_features.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

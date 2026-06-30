@@ -180,8 +180,9 @@ python tools/rtklib_dataset_adapter.py \
 The repository now includes the first reproducible layer for a GNSS spoof-detection paper platform:
 
 - `tools/build_detection_dataset.py` merges RTKLIB `.pos`/DOP data with FAST_GLIO loose/raw/tight GNSS logs.
+- `tools/extract_rinex_features.py` extracts RINEX per-satellite raw observation features and per-epoch summaries.
 - `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
-- `tools/smoke_paper_pipeline.py` is a self-contained CTest smoke test for clean and synthetic-attack cases.
+- `tools/smoke_paper_pipeline.py` and `tools/smoke_rinex_features.py` are self-contained CTest smoke tests.
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
 - `docs/paper_draft.md` contains the initial paper draft skeleton.
 
@@ -191,7 +192,24 @@ Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO 
 cmake --build build --target paper_pipeline
 ```
 
-Individual targets are also available: `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, and `paper_eval_attack`.
+Individual targets are also available: `rinex_features`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, and `paper_eval_attack`.
+
+Extract raw RINEX observation features directly:
+
+```bash
+python tools/extract_rinex_features.py \
+  --obs ../full_data/gnss/rover.obs \
+  --name full_data_rover \
+  --output-dir build/paper_platform/rinex_rover
+```
+
+This writes:
+
+```text
+build/paper_platform/rinex_rover/full_data_rover_satellite_features.csv
+build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv
+build/paper_platform/rinex_rover/full_data_rover_rinex_summary.json
+```
 
 Or run the tools directly:
 
@@ -202,6 +220,7 @@ python tools/build_detection_dataset.py \
   --loose /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_loose_diag.csv \
   --raw /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_raw_update_log.csv \
   --tight /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_tight_pose.csv \
+  --rinex-summary build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv \
   --name full_data_attack \
   --output-dir build/paper_platform/full_data_attack \
   --attack-window +180:+260 \

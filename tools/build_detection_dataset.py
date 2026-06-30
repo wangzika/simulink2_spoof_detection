@@ -41,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loose", help="FAST_GLIO Log/gnss_loose_diag.csv.")
     parser.add_argument("--raw", help="FAST_GLIO Log/gnss_raw_update_log.csv.")
     parser.add_argument("--tight", help="FAST_GLIO Log/gnss_tight_pose.csv.")
+    parser.add_argument("--rinex-summary", help="Optional epoch summary CSV from tools/extract_rinex_features.py.")
     parser.add_argument("--name", default="paper_dataset", help="Output prefix.")
     parser.add_argument(
         "--output-dir",
@@ -404,6 +405,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
     tight = read_indexed_csv(clean_path(args.tight))
     rtk, origin_summary = read_rtklib_pos(clean_path(args.rtklib_pos), args.gps_utc_leap_seconds, args.origin)
     dop = read_dop(clean_path(args.dop), args.gps_utc_leap_seconds)
+    rinex = read_indexed_csv(clean_path(args.rinex_summary))
 
     stamps = base_stamps(loose, raw, tight, rtk)
     if not stamps:
@@ -471,6 +473,20 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
         "dop_pdop",
         "dop_hdop",
         "dop_vdop",
+        "rinex_satellite_count",
+        "rinex_system_count",
+        "rinex_systems",
+        "rinex_code_obs_count",
+        "rinex_carrier_obs_count",
+        "rinex_doppler_obs_count",
+        "rinex_cn0_obs_count",
+        "rinex_mean_cn0_dbhz",
+        "rinex_min_cn0_dbhz",
+        "rinex_max_cn0_dbhz",
+        "rinex_low_cn0_satellite_count",
+        "rinex_code_delta_rms_m",
+        "rinex_doppler_consistency_rms_mps",
+        "rinex_lli_satellite_count",
         "synthetic_offset_x_m",
         "synthetic_offset_y_m",
         "synthetic_offset_z_m",
@@ -500,6 +516,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
             tight_row = nearest(tight, stamp, args.max_delta_s)
             rtk_row = nearest(rtk, stamp, args.max_delta_s)
             dop_row = nearest(dop, stamp, args.max_delta_s)
+            rinex_row = nearest(rinex, stamp, args.max_delta_s)
 
             rel_t = stamp - first_stamp
             scale = attack_scale(stamp, rel_t, windows, args.attack_ramp)
@@ -601,6 +618,20 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
                 "dop_pdop": fmt(parse_float(dop_row, "dop_pdop", parse_float(loose_row, "raw_rtk_dop_pdop"))),
                 "dop_hdop": fmt(parse_float(dop_row, "dop_hdop", parse_float(loose_row, "raw_rtk_dop_hdop"))),
                 "dop_vdop": fmt(parse_float(dop_row, "dop_vdop", parse_float(loose_row, "raw_rtk_dop_vdop"))),
+                "rinex_satellite_count": str(parse_int(rinex_row, "satellite_count")),
+                "rinex_system_count": str(parse_int(rinex_row, "system_count")),
+                "rinex_systems": (rinex_row or {}).get("systems", ""),
+                "rinex_code_obs_count": str(parse_int(rinex_row, "code_obs_count")),
+                "rinex_carrier_obs_count": str(parse_int(rinex_row, "carrier_obs_count")),
+                "rinex_doppler_obs_count": str(parse_int(rinex_row, "doppler_obs_count")),
+                "rinex_cn0_obs_count": str(parse_int(rinex_row, "cn0_obs_count")),
+                "rinex_mean_cn0_dbhz": fmt(parse_float(rinex_row, "mean_cn0_dbhz")),
+                "rinex_min_cn0_dbhz": fmt(parse_float(rinex_row, "min_cn0_dbhz")),
+                "rinex_max_cn0_dbhz": fmt(parse_float(rinex_row, "max_cn0_dbhz")),
+                "rinex_low_cn0_satellite_count": str(parse_int(rinex_row, "low_cn0_satellite_count")),
+                "rinex_code_delta_rms_m": fmt(parse_float(rinex_row, "code_delta_rms_m")),
+                "rinex_doppler_consistency_rms_mps": fmt(parse_float(rinex_row, "doppler_consistency_rms_mps")),
+                "rinex_lli_satellite_count": str(parse_int(rinex_row, "lli_satellite_count")),
                 "synthetic_offset_x_m": fmt(sx),
                 "synthetic_offset_y_m": fmt(sy),
                 "synthetic_offset_z_m": fmt(sz),
@@ -636,6 +667,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
             "tight_rows": len(tight.rows),
             "rtk_rows": len(rtk.rows),
             "dop_rows": len(dop.rows),
+            "rinex_epoch_rows": len(rinex.rows),
         },
         "origin": origin_summary,
         "outputs": {

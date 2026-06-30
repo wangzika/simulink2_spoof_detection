@@ -8,6 +8,8 @@
 
 - RTKLIB `.pos` 到 ENU 轨迹、仿真 scenario、Rerun replay CSV 的适配。
 - FAST_GLIO `gnss_loose_diag.csv`、`gnss_raw_update_log.csv`、`gnss_tight_pose.csv` 与 RTKLIB/DOP 的同时间轴合并。
+- RINEX `rover.obs` 原始观测特征提取：每颗卫星每历元的 code/carrier/Doppler/C/N0、LLI、SSI、码间差、code-Doppler consistency。
+- RINEX 每历元汇总特征合入检测数据集：卫星数、系统数、观测数、C/N0 统计、低 C/N0 卫星数、码间差 RMS、周跳计数。
 - GPS week/TOW 到 Unix 时间的转换，默认 GPST-UTC = 18 s。
 - 合成欺骗窗口注入：位置残差偏移、伪距延迟、ramp-in/ramp-out。
 - 基线检测分数：LiDAR/IMU-GNSS 残差、Mahalanobis gate、伪距 RMS/最大残差、Doppler/TDCP、RTK 质量。
@@ -23,6 +25,23 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+RINEX 原始观测特征：
+
+```bash
+python tools/extract_rinex_features.py \
+  --obs ../full_data/gnss/rover.obs \
+  --name full_data_rover \
+  --output-dir build/paper_platform/rinex_rover
+```
+
+输出文件：
+
+```text
+build/paper_platform/rinex_rover/full_data_rover_satellite_features.csv
+build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv
+build/paper_platform/rinex_rover/full_data_rover_rinex_summary.json
+```
+
 生成真实数据检测集：
 
 ```bash
@@ -32,6 +51,7 @@ python tools/build_detection_dataset.py \
   --loose /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_loose_diag.csv \
   --raw /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_raw_update_log.csv \
   --tight /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_tight_pose.csv \
+  --rinex-summary build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv \
   --name full_data_clean \
   --output-dir build/paper_platform/full_data_clean
 ```
@@ -45,6 +65,7 @@ python tools/build_detection_dataset.py \
   --loose /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_loose_diag.csv \
   --raw /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_raw_update_log.csv \
   --tight /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log/gnss_tight_pose.csv \
+  --rinex-summary build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv \
   --name full_data_attack \
   --output-dir build/paper_platform/full_data_attack \
   --attack-window +180:+260 \
@@ -60,27 +81,28 @@ python tools/evaluate_detection.py \
 CMake 快捷入口：
 
 ```bash
+cmake --build build --target rinex_features
 cmake --build build --target paper_dataset
 cmake --build build --target paper_dataset_attack
-cmake --build build --target paper_eval_clean
 cmake --build build --target paper_eval_attack
+cmake --build build --target paper_eval_clean
 cmake --build build --target paper_pipeline
 ```
 
 ## Phase 2: 原始 GNSS 观测层
 
-下一阶段要把 RINEX/RTKLIB 原始观测进一步结构化，形成可发表的原始观测特征：
+当前已完成 RINEX 原始观测结构化。下一步要把这些观测进一步变成检测算法里的统计量：
 
-- 每颗卫星的 pseudorange、Doppler、carrier phase、C/N0、elevation/azimuth。
-- 单差/双差、TDCP、RAIM 残差和 robust weighting。
+- 每颗卫星的 pseudorange、carrier phase、C/N0 已抽取；base.obs 中的 Doppler 也可抽取，rover.obs 当前无 Doppler 字段。
+- 下一步补 elevation/azimuth、单差/双差、TDCP、RAIM 残差和 robust weighting。
 - 卫星系统拆分：GPS、Galileo、BDS。
 - 原始观测级 spoof injection，而不仅是融合残差级注入。
 
 验收标准：
 
-- 输出 per-satellite long-format CSV。
-- 能按时间恢复每历元的残差统计。
-- 与 `gnss_raw_update_log.csv` 的 PR RMS、healthy count、outlier count 在趋势上匹配。
+- 已输出 per-satellite long-format CSV。
+- 已输出 per-epoch summary CSV，并合入检测数据集。
+- 待完成：与 `gnss_raw_update_log.csv` 的 PR RMS、healthy count、outlier count 做定量趋势匹配。
 
 ## Phase 3: 可发表检测算法
 

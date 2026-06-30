@@ -25,9 +25,9 @@ Prior GNSS spoofing detection methods can be grouped into signal-level monitorin
 
 The platform contains four layers:
 
-1. Data ingestion: RINEX/RTKLIB products, FAST_GLIO loose/tight GNSS fusion logs, and simulation CSVs.
+1. Data ingestion: RINEX raw observations, RTKLIB products, FAST_GLIO loose/tight GNSS fusion logs, and simulation CSVs.
 2. Time synchronization: GPS week/TOW and GPST timestamps are converted to Unix time with an explicit GPST-UTC offset.
-3. Feature construction: pseudorange residual statistics, Doppler/TDCP status, RTK quality, DOP, LiDAR/IMU-GNSS residuals, and environment-quality indicators.
+3. Feature construction: per-satellite code, carrier phase, Doppler when available, C/N0, loss-of-lock indicators, inter-frequency code differences, pseudorange residual statistics, RTK quality, DOP, LiDAR/IMU-GNSS residuals, and environment-quality indicators.
 4. Detection and evaluation: baseline scoring, sequential confirmation, attack labels, metrics, and reports.
 
 ## 4. Attack Model
@@ -36,7 +36,9 @@ We consider spoofing attacks that introduce a controlled GNSS measurement bias o
 
 ## 5. Detection Method
 
-The baseline detector computes a normalized spoofing score:
+The platform separates raw feature extraction from detector decisions. At the raw-observation layer, each RINEX epoch is converted into a long-format satellite table and an epoch-level summary containing satellite count, constellation coverage, code/carrier/C/N0 observation counts, C/N0 statistics, inter-frequency code-difference RMS, and loss-of-lock counts. These features are synchronized with RTKLIB and FAST_GLIO logs before detector evaluation.
+
+The current baseline detector computes a normalized spoofing score:
 
 - LiDAR/IMU-GNSS residual score.
 - Mahalanobis innovation score relative to the fusion gate.
@@ -72,13 +74,12 @@ Planned experiments:
 
 ## 7. Preliminary Platform Status
 
-The current implementation already builds synchronized detection CSV files and evaluation reports. Initial smoke tests verify that clean synthetic fixtures produce no false positives, while injected spoofing windows are detected. Real-data reports will be filled after the full experiment matrix is generated and reviewed.
+The current implementation already builds synchronized detection CSV files and evaluation reports. Initial smoke tests verify that clean synthetic fixtures produce no false positives, while injected spoofing windows are detected. The current rover RINEX file produces 3221 epochs and 77305 per-satellite observation rows, which are summarized and merged into the detection dataset. Real-data reports will be filled after the full experiment matrix is generated and reviewed.
 
 ## 8. Limitations and Next Steps
 
-The present spoofing injection is residual-level rather than raw observation-level. This is useful for platform verification, but a top-tier GNSS paper should include raw RINEX-level injection and satellite-wise residual analysis. The next step is to parse rover/base RINEX observations, construct per-satellite features, and compare them against RTKLIB/FAST_GLIO internal diagnostics.
+The present spoofing injection is residual-level rather than raw observation-level. This is useful for platform verification, but a top-tier GNSS paper should include raw RINEX-level injection and satellite-wise residual analysis. The next step is to estimate satellite geometry from navigation ephemerides, compute predicted pseudoranges and Doppler/TDCP residuals, and validate the extracted RINEX features against RTKLIB/FAST_GLIO internal diagnostics.
 
 ## 9. Conclusion
 
 This paper will present a reproducible GNSS spoofing-detection platform that integrates raw GNSS diagnostics with LiDAR-inertial consistency. The proposed evaluation pipeline is designed to measure both detection reliability and operational latency, enabling systematic comparison of classical residual tests and multi-modal adaptive detectors.
-
