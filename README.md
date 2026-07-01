@@ -188,6 +188,7 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 - `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
 - `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, `tools/smoke_raw_residuals.py`, and `tools/smoke_adaptive_detector.py` are self-contained CTest smoke tests.
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
+- `docs/gnss_spoofing_literature.md` summarizes GNSS spoofing/jamming detection literature by method family for the Related Work section.
 - `docs/paper_draft.md` contains the initial paper draft skeleton.
 
 Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO logs are present:

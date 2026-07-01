@@ -51,11 +51,28 @@ The contributions are:
 \end{itemize}
 
 \section{Related Work}
-GNSS spoofing detection methods include signal-level authentication, multi-antenna angle checks, measurement-level residual tests, navigation-filter innovation monitoring, and cross-modal consistency checks.
-Signal-level methods can be powerful but often require receiver internals or specialized hardware.
-Measurement-level RAIM and GLRT are transparent and receiver-output compatible, but they are sensitive to geometry and multipath.
-Cross-modal methods compare GNSS with inertial, visual, LiDAR, or map constraints, but naive fixed thresholds can overreact to non-attack degradation.
-This work focuses on a deployable measurement/navigation-layer detector using RINEX observations~\cite{rinex304}, RTKLIB products~\cite{rtklib}, and LiDAR--inertial diagnostics inspired by FAST-LIO2~\cite{fastlio2}.
+The modern spoofing threat was made concrete by portable civilian-spoofer demonstrations~\cite{humphreys2008spoofer}, which motivated receiver-autonomous defenses at several layers.
+Signal- and receiver-level monitors examine received power, automatic gain control, C/N0 changes, correlation distortion, or authenticated navigation data.
+AGC monitoring can expose overpowering spoofers with minimal computation~\cite{akos2012agc}, and authentication-aided techniques use unpredictable data symbols or partial correlations to detect replay attacks~\cite{seco2021replay}.
+More active receiver designs can suppress spoofers in UAV settings~\cite{sathaye2021semperfi}.
+These approaches are powerful when receiver internals or authentication signals are available, but they are less convenient for post-processing RINEX/RTK/LiDAR logs or for commodity receivers that expose only navigation and observation products.
+
+Spatial and multi-receiver methods exploit geometry.
+Two-antenna differential carrier phase detects spoofing from inconsistencies in the apparent direction of arrival~\cite{psiaki2014twoantenna}.
+Crowdsourced double-differenced pseudorange distributions can reveal spatially coherent spoofing over multiple users~\cite{chen2024d2sp}.
+Wide-area maritime monitors use AIS-derived motion consistency to detect spoofing or jamming events at scale~\cite{spravil2023nmea,park2026ais}.
+These methods provide strong evidence, but they require antenna baselines, cooperative users, or external vessel/traffic infrastructure that is not always available for a single ground robot.
+
+Measurement-level integrity monitoring is closer to the interface used in this paper.
+Classical RAIM and GLRT-style residual tests are transparent and receiver-output compatible, and recent work augments RAIM with opportunistic information models~\cite{liu2024gmraim}.
+Low-cost COTS monitoring has also shown that commodity receiver outputs can detect jamming and spoofing signatures~\cite{kriezis2025cots}.
+However, fixed residual thresholds are sensitive to C/N0, DOP, satellite visibility, multipath, and RTK ambiguity state.
+This sensitivity is precisely why a high-recall baseline can suffer low precision under degraded but non-attack conditions.
+
+Cross-modal defenses compare GNSS with inertial, vehicle, or other navigation sensors.
+Carrier phase with IMU constraints improves ground-vehicle spoofing detection~\cite{clements2022carrierimu}, consumer INS can be coupled with carrier phase for low-cost detection~\cite{johansson2025consumerins}, and autonomous-vehicle frameworks fuse GNSS with onboard sensors to identify spoofing attacks~\cite{dasgupta2022sensorfusion}.
+These works motivate our use of LiDAR--inertial consistency, but many systems still use static decision gates or do not explicitly model benign environmental degradation.
+Our contribution is therefore a deployable measurement/navigation-layer detector using RINEX observations~\cite{rinex304}, RTKLIB products~\cite{rtklib}, and LiDAR--inertial diagnostics inspired by FAST-LIO2~\cite{fastlio2}, with an environment-adaptive threshold and sequential GLRT accumulation to separate persistent spoofing evidence from urban-quality degradation.
 
 \section{System and Features}
 Fig.~\ref{fig:architecture} summarizes the pipeline.
