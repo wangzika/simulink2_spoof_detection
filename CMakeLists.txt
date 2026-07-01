@@ -273,6 +273,16 @@ if (Python3_EXECUTABLE)
             COMMENT "Run route-split tuning/test evaluation with optional ML baseline"
             VERBATIM
         )
+        add_custom_target(configured_route_experiments
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/run_configured_routes.py
+                --config ${CMAKE_CURRENT_SOURCE_DIR}/datasets/routes.yaml
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/configured_route_experiments
+            DEPENDS paper_dataset
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Run configured multi-route experiments from datasets/routes.yaml"
+            VERBATIM
+        )
         add_custom_target(paper_figures
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_paper_figures.py
@@ -383,6 +393,11 @@ if (BUILD_TESTING)
         add_test(
             NAME route_split_smoke
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_route_split_experiments.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        add_test(
+            NAME configured_routes_smoke
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_configured_routes.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

@@ -19,6 +19,7 @@
 - Baseline/ablation：RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、fixed fused、adaptive fused、EA-SGLRT、no raw、no LIO、no environment、no CUSUM。
 - ML baseline：`tools/ml_baseline.py` 提供无 sklearn 依赖的浅树集成分类器，`route_split_experiments.py` 可在 train routes 上训练并在 test routes 上作为 optional baseline 对比。
 - Route split：`tools/route_split_experiments.py` 支持多 route detection CSV，train-route 调参、test-route 评估，输出 tuning/test/train/detector summary。
+- Route registry：`datasets/routes.yaml` 记录 route 数据源、train/test split 和实验矩阵；`tools/run_configured_routes.py` 可从配置直接生成 route-held-out 结果和 manifest。
 - 论文级补充统计：按 attack type/strength/ramp 分组、clean vs degraded 误报分解、EA-SGLRT 参数敏感性、攻击解释类型摘要、paired bootstrap/sign-test。
 - GPS week/TOW 到 Unix 时间的转换，默认 GPST-UTC = 18 s。
 - 合成欺骗窗口注入：位置残差偏移、伪距延迟、ramp-in/ramp-out。
@@ -102,8 +103,27 @@ cmake --build build --target paper_eval_clean
 cmake --build build --target paper_pipeline
 cmake --build build --target adaptive_experiments
 cmake --build build --target route_split_experiments
+cmake --build build --target configured_route_experiments
 cmake --build build --target paper_figures
 cmake --build build --target paper_pdf
+```
+
+多路线配置入口：
+
+```bash
+python tools/run_configured_routes.py \
+  --config datasets/routes.yaml \
+  --output-dir build/paper_platform/configured_route_experiments
+```
+
+主要输出：
+
+```text
+build/paper_platform/configured_route_experiments/configured_routes_manifest.json
+build/paper_platform/configured_route_experiments/tuning_summary.csv
+build/paper_platform/configured_route_experiments/test_results.csv
+build/paper_platform/configured_route_experiments/detector_summary.csv
+build/paper_platform/configured_route_experiments/route_split_summary.json
 ```
 
 LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编译结果在 `paper/build/main.pdf`。
@@ -141,7 +161,7 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 - 当前矩阵中 EA-SGLRT 在 82 场景上取得 mean attack F1 高于 fixed fused，同时 mean false alarms/min 更低。
 - 已包含固定阈值、RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
 - 已补充 attack type/strength/ramp breakdown、clean/degraded false-alarm breakdown、参数敏感性和 paired bootstrap/sign-test。
-- 已新增 route-held-out 实验入口和 ML tree-ensemble optional baseline。
+- 已新增 route-held-out 实验入口、配置化 route registry 和 ML tree-ensemble optional baseline。
 - 下一步要把 degraded non-attack 从合成降质扩展为真实 urban/open-sky 分段，并用不同 route 做真正 held-out 结论。
 
 ## Phase 4: 论文实验矩阵
@@ -154,7 +174,7 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 - 不同环境/质量：clean real、degraded non-attack。
 - 消融：去掉 raw GNSS、去掉 LIO consistency、去掉 adaptive gate、去掉 CUSUM。
 - 统计：paired bootstrap 95% CI、sign-test、攻击类型分解、参数敏感性。
-- Route split：支持 train-route 参数选择和 test-route 评估；当前单 route 目标只能作为 smoke/demo，投稿结论需要多 route 输入。
+- Route split：支持 train-route 参数选择和 test-route 评估；`datasets/routes.yaml` 已提供可复现实验注册表；当前单 route 目标只能作为 smoke/demo，投稿结论需要多 route 输入。
 - Optional ML baseline：浅树集成分类器可作为非方法主线的对比基线。
 
 投稿前仍建议补充：

@@ -1,0 +1,41 @@
+# Route registry for reproducible GNSS spoof-detection experiments.
+#
+# Add new routes by appending another item under `routes`. A route can point
+# directly to an existing detection CSV, or carry source paths used by the
+# paper-data pipeline for documentation and future automation.
+routes:
+  - name: full_data
+    environment: mixed_real_route
+    description: Current synchronized RTKLIB + FAST_GLIO + RINEX route.
+    detection_csv: build/paper_platform/full_data_clean/full_data_clean_detection.csv
+    rinex_obs: ../full_data/gnss/rover.obs
+    broadcast_nav: ../full_data/gnss/BRDM00DLR_S_20240290000_01D_MN.rnx
+    rtklib_pos: ../full_data/gnss/rtklib.pos
+    dop: ../full_data/gnss/dop.txt
+    fast_glio_log_dir: /Users/wangzhibo/Desktop/FAST_GLIO/FAST_LIO/Log
+
+splits:
+  train:
+    - full_data
+  test:
+    - full_data
+
+experiment:
+  strengths_m:
+    - 2
+    - 10
+  ramps_s:
+    - 1
+    - 20
+  attack_types:
+    - position_bias
+    - coordinated_spoof
+  adaptive_gains:
+    - 1.35
+    - 2.0
+  cusum_thresholds:
+    - 0.5
+    - 0.75
+  ml_max_train_rows: 6000
+  ml_trees: 16
+  ml_depth: 4
