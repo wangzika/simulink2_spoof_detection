@@ -291,8 +291,8 @@ if (Python3_EXECUTABLE)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/adaptive_sequential_detector.py
                 ${PAPER_ATTACK_FULL_TIMELINE_CSV}
                 --detectors adaptive_seq_full
-                --adaptive-gain 2.0
-                --cusum-threshold 0.75
+                --adaptive-gain 0.75
+                --cusum-threshold 0.35
                 --scenario full_data_attack_full_timeline
                 --output-csv ${PAPER_ATTACK_FULL_TIMELINE_ADAPTIVE_CSV}
                 --metrics-json ${PAPER_ATTACK_FULL_TIMELINE_DIR}/full_data_attack_full_timeline_adaptive_seq_metrics.json

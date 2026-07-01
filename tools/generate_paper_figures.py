@@ -84,6 +84,7 @@ def load_inputs(args: argparse.Namespace):
     attack_strength_summary = pd.read_csv(require(adaptive_dir / "attack_strength_summary.csv"))
     attack_ramp_summary = pd.read_csv(require(adaptive_dir / "attack_ramp_summary.csv"))
     environment_summary = pd.read_csv(require(adaptive_dir / "environment_summary.csv"))
+    integrity_summary = pd.read_csv(require(adaptive_dir / "integrity_summary.csv"))
     pareto_summary = pd.read_csv(require(adaptive_dir / "pareto_summary.csv"))
     sensitivity_summary = pd.read_csv(require(adaptive_dir / "sensitivity_summary.csv"))
     attack_classification_summary = pd.read_csv(require(adaptive_dir / "attack_classification_summary.csv"))
@@ -108,6 +109,7 @@ def load_inputs(args: argparse.Namespace):
         attack_strength_summary,
         attack_ramp_summary,
         environment_summary,
+        integrity_summary,
         pareto_summary,
         sensitivity_summary,
         attack_classification_summary,
@@ -1008,6 +1010,7 @@ def write_metrics_tex(
     scenario_summary: pd.DataFrame,
     attack_type_summary: pd.DataFrame,
     environment_summary: pd.DataFrame,
+    integrity_summary: pd.DataFrame,
     pareto_summary: pd.DataFrame,
     sensitivity_summary: pd.DataFrame,
     attack_classification_summary: pd.DataFrame,
@@ -1019,6 +1022,7 @@ def write_metrics_tex(
     raw_raim_detected = int((pd.to_numeric(attack.get("raw_raim_detected", pd.Series(dtype=float)), errors="coerce").fillna(0) > 0).sum())
     raw_reference_mean = float(pd.to_numeric(attack.get("raw_reference_residual_rms_m", pd.Series(dtype=float)), errors="coerce").fillna(0).mean())
     summary_by_detector = detector_summary.set_index("detector")
+    integrity_by_detector = integrity_summary.set_index("detector") if not integrity_summary.empty else pd.DataFrame()
     pareto_by_detector = pareto_summary.set_index("detector") if not pareto_summary.empty else pd.DataFrame()
     paired_stats = experiment_summary.get("paired_statistics", {})
     primary_attack_types = attack_type_summary[attack_type_summary["detector"] == "adaptive_seq_full"].copy()
@@ -1046,6 +1050,14 @@ def write_metrics_tex(
         if pareto_by_detector.empty or detector not in pareto_by_detector.index:
             return 0.0
         value = pareto_by_detector.loc[detector, column]
+        if value == "" or pd.isna(value):
+            return 0.0
+        return float(value)
+
+    def ivalue(detector: str, column: str) -> float:
+        if integrity_by_detector.empty or detector not in integrity_by_detector.index:
+            return 0.0
+        value = integrity_by_detector.loc[detector, column]
         if value == "" or pd.isna(value):
             return 0.0
         return float(value)
@@ -1159,14 +1171,21 @@ def write_metrics_tex(
         macro("AdaptiveSeqRecall", f"{dvalue('adaptive_seq_full', 'attack_recall_mean'):.3f}"),
         macro("AdaptiveSeqFone", f"{dvalue('adaptive_seq_full', 'attack_f1_mean'):.3f}"),
         macro("AdaptiveSeqLatency", f"{dvalue('adaptive_seq_full', 'attack_latency_mean_s'):.3f}"),
+        macro("AdaptiveSeqMissedDetectionRate", f"{ivalue('adaptive_seq_full', 'missed_detection_rate'):.3f}"),
+        macro("AdaptiveSeqTimeToAlert", f"{ivalue('adaptive_seq_full', 'attack_time_to_alert_s'):.3f}"),
+        macro("AdaptiveSeqFaBudget", f"{ivalue('adaptive_seq_full', 'false_alarm_budget_per_min'):.3f}"),
+        macro("AdaptiveSeqFaBudgetSatisfied", f"{int(ivalue('adaptive_seq_full', 'satisfies_false_alarm_budget'))}"),
         macro("AdaptiveSeqCleanFalseAlarm", f"{dvalue('adaptive_seq_full', 'clean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveSeqFalseAlarm", f"{dvalue('adaptive_seq_full', 'mean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveSeqDegradedFalseAlarm", f"{dvalue('adaptive_seq_full', 'degraded_false_alarm_per_min'):.3f}"),
         macro("ParetoFrontDetectorCount", f"{int((pd.to_numeric(pareto_summary.get('is_pareto_front', pd.Series(dtype=float)), errors='coerce').fillna(0) > 0).sum())}"),
         macro("AdaptiveParetoStatus", "non-dominated" if pvalue("adaptive_seq_full", "is_pareto_front") > 0.5 else "dominated"),
         macro("AdaptiveVsLioFalseAlarmReductionPercent", f"{pvalue('adaptive_seq_full', 'false_alarm_reduction_vs_lio_percent'):.1f}"),
+        macro("AdaptiveVsFixedFalseAlarmReductionPercent", f"{ivalue('adaptive_seq_full', 'false_alarm_reduction_vs_fixed_percent'):.1f}"),
         macro("AdaptiveVsLioFoneDelta", f"{(dvalue('adaptive_seq_full', 'attack_f1_mean') - dvalue('lio_residual_only', 'attack_f1_mean')):.3f}"),
         macro("FixedFusedMatrixFone", f"{dvalue('fixed_fused', 'attack_f1_mean'):.3f}"),
+        macro("FixedFusedMissedDetectionRate", f"{ivalue('fixed_fused', 'missed_detection_rate'):.3f}"),
+        macro("FixedFusedTimeToAlert", f"{ivalue('fixed_fused', 'attack_time_to_alert_s'):.3f}"),
         macro("FixedFusedPrecision", f"{dvalue('fixed_fused', 'attack_precision_mean'):.3f}"),
         macro("FixedFusedRecall", f"{dvalue('fixed_fused', 'attack_recall_mean'):.3f}"),
         macro("FixedFusedCleanFalseAlarm", f"{dvalue('fixed_fused', 'clean_false_alarm_per_min'):.3f}"),
@@ -1180,6 +1199,8 @@ def write_metrics_tex(
         macro("PseudorangeGlrtRecall", f"{dvalue('pseudorange_glrt_only', 'attack_recall_mean'):.3f}"),
         macro("PseudorangeGlrtFalseAlarm", f"{dvalue('pseudorange_glrt_only', 'mean_false_alarm_per_min'):.3f}"),
         macro("LioResidualFone", f"{dvalue('lio_residual_only', 'attack_f1_mean'):.3f}"),
+        macro("LioResidualMissedDetectionRate", f"{ivalue('lio_residual_only', 'missed_detection_rate'):.3f}"),
+        macro("LioResidualTimeToAlert", f"{ivalue('lio_residual_only', 'attack_time_to_alert_s'):.3f}"),
         macro("LioResidualPrecision", f"{dvalue('lio_residual_only', 'attack_precision_mean'):.3f}"),
         macro("LioResidualRecall", f"{dvalue('lio_residual_only', 'attack_recall_mean'):.3f}"),
         macro("LioResidualFalseAlarm", f"{dvalue('lio_residual_only', 'mean_false_alarm_per_min'):.3f}"),
@@ -1266,6 +1287,7 @@ def main() -> int:
         attack_strength_summary,
         attack_ramp_summary,
         environment_summary,
+        integrity_summary,
         pareto_summary,
         sensitivity_summary,
         attack_classification_summary,
@@ -1308,6 +1330,7 @@ def main() -> int:
         scenario_summary,
         attack_type_summary,
         environment_summary,
+        integrity_summary,
         pareto_summary,
         sensitivity_summary,
         attack_classification_summary,

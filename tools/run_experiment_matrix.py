@@ -37,8 +37,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attack-window", default="+20:+260")
     parser.add_argument("--write-scenario-csvs", action="store_true", default=True)
     parser.add_argument("--default-scenario", default="coordinated_spoof_s10_r5")
-    parser.add_argument("--cusum-threshold", type=float, default=0.75)
-    parser.add_argument("--adaptive-gain", type=float, default=2.0)
+    parser.add_argument("--cusum-threshold", type=float, default=0.35)
+    parser.add_argument("--adaptive-gain", type=float, default=0.75)
     parser.add_argument("--base-threshold", type=float, default=1.0)
     parser.add_argument("--sensitivity-gains", default="0,0.75,1.35,2.0")
     parser.add_argument("--sensitivity-cusum-thresholds", default="0.35,0.5,0.75,1.0")
@@ -383,6 +383,41 @@ def environment_summary_rows(aggregate_rows: list[dict[str, object]]) -> list[di
     return rows
 
 
+def integrity_summary_rows(aggregate_rows: list[dict[str, object]], fa_limit: float) -> list[dict[str, object]]:
+    """GNSS-integrity oriented metrics for publication reporting."""
+    by_name = {str(row["detector"]): row for row in aggregate_rows}
+    fixed_fa = float(by_name.get("fixed_fused", {}).get("mean_false_alarm_per_min", 0.0) or 0.0)
+    lio_fa = float(by_name.get("lio_residual_only", {}).get("mean_false_alarm_per_min", 0.0) or 0.0)
+    rows: list[dict[str, object]] = []
+    for row in aggregate_rows:
+        detector_name = str(row["detector"])
+        recall = float(row["attack_recall_mean"])
+        fa = float(row["mean_false_alarm_per_min"])
+        latency = row.get("attack_latency_mean_s", "")
+        latency_value = float(latency) if latency != "" else 0.0
+        rows.append(
+            {
+                "detector": detector_name,
+                "attack_recall_mean": recall,
+                "missed_detection_rate": 1.0 - recall,
+                "attack_time_to_alert_s": latency_value,
+                "mean_false_alarm_per_min": fa,
+                "false_alarm_budget_per_min": fa_limit,
+                "satisfies_false_alarm_budget": int(fa <= fa_limit),
+                "false_alarm_reduction_vs_fixed_percent": 100.0 * (1.0 - fa / fixed_fa) if fixed_fa > 1e-12 else "",
+                "false_alarm_reduction_vs_lio_percent": 100.0 * (1.0 - fa / lio_fa) if lio_fa > 1e-12 else "",
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            -int(item["satisfies_false_alarm_budget"]),
+            float(item["missed_detection_rate"]),
+            float(item["mean_false_alarm_per_min"]),
+        )
+    )
+    return rows
+
+
 def pareto_summary_rows(aggregate_rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """Compute the F1-vs-false-alarm operating frontier across detectors."""
     if not aggregate_rows:
@@ -490,19 +525,25 @@ def mark_false_alarm_constrained_selection(rows: list[dict[str, object]], fa_lim
     if not rows:
         return {}
     feasible = [row for row in rows if float(row["mean_false_alarm_per_min"]) <= fa_limit]
-    candidates = feasible if feasible else rows
-    best = max(
-        candidates,
-        key=lambda row: (
-            float(row["attack_f1_mean"]),
-            float(row["attack_precision_mean"]),
-            -float(row["mean_false_alarm_per_min"]),
-            -float(row["attack_latency_mean_s"] or 0.0),
-        ),
-    )
+    if feasible:
+        # Calibrate from non-attack data only: choose the most sensitive
+        # configuration that still satisfies the false-alarm budget.
+        best = min(
+            feasible,
+            key=lambda row: (
+                float(row["cusum_threshold"]),
+                float(row["adaptive_gain"]),
+                float(row["mean_false_alarm_per_min"]),
+            ),
+        )
+        selection_rule = "non_attack_budget_most_sensitive"
+    else:
+        best = min(rows, key=lambda row: float(row["mean_false_alarm_per_min"]))
+        selection_rule = "minimum_false_alarm_no_feasible_budget"
     for row in rows:
         row["operating_fa_limit"] = fa_limit
         row["is_constrained_best"] = int(row is best)
+        row["selection_rule"] = selection_rule
     return best
 
 
@@ -583,6 +624,7 @@ def write_markdown(
     attack_type_rows: list[dict[str, object]],
     sensitivity: list[dict[str, object]],
     pareto_rows: list[dict[str, object]],
+    integrity_rows: list[dict[str, object]],
 ) -> None:
     lines = [
         "# Adaptive Sequential GLRT Experiment Matrix",
@@ -627,6 +669,23 @@ def write_markdown(
     lines.extend(
         [
             "",
+            "## Integrity-Oriented Metrics",
+            "",
+            "| Detector | Missed detection rate | Time to alert (s) | Mean FA/min | Budget satisfied |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in integrity_rows:
+        if row["detector"] not in {"adaptive_seq_full", "fixed_fused", "lio_residual_only", "pseudorange_glrt_only", "robust_raim"}:
+            continue
+        lines.append(
+            f"| {row['detector']} | {float(row['missed_detection_rate']):.3f} | "
+            f"{float(row['attack_time_to_alert_s']):.3f} | {float(row['mean_false_alarm_per_min']):.3f} | "
+            f"{int(row['satisfies_false_alarm_budget'])} |"
+        )
+    lines.extend(
+        [
+            "",
             "## Attack-Type Breakdown",
             "",
             "| Attack type | EA-SGLRT F1 | EA-SGLRT recall | Mean latency (s) |",
@@ -651,7 +710,7 @@ def write_markdown(
                 "",
                 f"- Best grid F1: {float(best['attack_f1_mean']):.3f} at adaptive_gain={float(best['adaptive_gain']):.2f}, cusum_threshold={float(best['cusum_threshold']):.2f}.",
                 f"- Selected config F1: {float(selected['attack_f1_mean']):.3f}, mean FA/min={float(selected['mean_false_alarm_per_min']):.3f}.",
-                f"- False-alarm-constrained best (FA/min <= {float(constrained['operating_fa_limit']):.3f}): "
+                f"- False-alarm-constrained selected by `{constrained['selection_rule']}` (FA/min <= {float(constrained['operating_fa_limit']):.3f}): "
                 f"F1={float(constrained['attack_f1_mean']):.3f}, adaptive_gain={float(constrained['adaptive_gain']):.2f}, "
                 f"cusum_threshold={float(constrained['cusum_threshold']):.2f}, mean FA/min={float(constrained['mean_false_alarm_per_min']):.3f}.",
             ]
@@ -786,6 +845,7 @@ def main() -> int:
     strength_rows = grouped_metric_rows(matrix_rows, "strength_m", "strength_m")
     ramp_rows = grouped_metric_rows(matrix_rows, "ramp_s", "ramp_s")
     environment_rows = environment_summary_rows(aggregate_rows)
+    integrity_rows = integrity_summary_rows(aggregate_rows, args.operating_fa_limit)
     pareto_rows = pareto_summary_rows(aggregate_rows)
     sensitivity = sensitivity_rows(
         scenarios,
@@ -853,6 +913,17 @@ def main() -> int:
         "degraded_minus_clean_fa_per_min",
         "degraded_to_clean_ratio",
     ]
+    integrity_columns = [
+        "detector",
+        "attack_recall_mean",
+        "missed_detection_rate",
+        "attack_time_to_alert_s",
+        "mean_false_alarm_per_min",
+        "false_alarm_budget_per_min",
+        "satisfies_false_alarm_budget",
+        "false_alarm_reduction_vs_fixed_percent",
+        "false_alarm_reduction_vs_lio_percent",
+    ]
     pareto_columns = [
         "detector",
         "attack_precision_mean",
@@ -879,6 +950,7 @@ def main() -> int:
         "operating_fa_limit",
         "is_selected_config",
         "is_constrained_best",
+        "selection_rule",
     ]
     classification_columns = [
         "true_attack_type",
@@ -900,6 +972,7 @@ def main() -> int:
     write_csv(output_dir / "attack_strength_summary.csv", strength_columns, strength_rows)
     write_csv(output_dir / "attack_ramp_summary.csv", ramp_columns, ramp_rows)
     write_csv(output_dir / "environment_summary.csv", environment_columns, environment_rows)
+    write_csv(output_dir / "integrity_summary.csv", integrity_columns, integrity_rows)
     write_csv(output_dir / "pareto_summary.csv", pareto_columns, pareto_rows)
     write_csv(output_dir / "sensitivity_summary.csv", sensitivity_columns, sensitivity)
     write_csv(output_dir / "attack_classification_summary.csv", classification_columns, classification_rows)
@@ -930,6 +1003,7 @@ def main() -> int:
             "attack_strength_summary_csv": str(output_dir / "attack_strength_summary.csv"),
             "attack_ramp_summary_csv": str(output_dir / "attack_ramp_summary.csv"),
             "environment_summary_csv": str(output_dir / "environment_summary.csv"),
+            "integrity_summary_csv": str(output_dir / "integrity_summary.csv"),
             "pareto_summary_csv": str(output_dir / "pareto_summary.csv"),
             "sensitivity_summary_csv": str(output_dir / "sensitivity_summary.csv"),
             "attack_classification_summary_csv": str(output_dir / "attack_classification_summary.csv"),
@@ -938,7 +1012,7 @@ def main() -> int:
     }
     write_json(output_dir / "experiment_summary.json", summary)
     write_json(output_dir / "statistical_tests.json", paired_stats)
-    write_markdown(output_dir / "experiment_summary.md", aggregate_rows, scenario_rows, paired_stats, attack_type_rows, sensitivity, pareto_rows)
+    write_markdown(output_dir / "experiment_summary.md", aggregate_rows, scenario_rows, paired_stats, attack_type_rows, sensitivity, pareto_rows, integrity_rows)
 
     print("Adaptive experiment matrix complete")
     print(f"  scenarios: {summary['scenarios']}")

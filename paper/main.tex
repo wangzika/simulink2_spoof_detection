@@ -24,7 +24,7 @@ GNSS spoofing can bias navigation solutions while preserving plausible receiver 
 Fixed-threshold residual monitors are attractive because they are transparent, but they often confuse spoofing with benign degradation caused by low C/N0, poor geometry, RTK ambiguity changes, and LiDAR--inertial alignment transients.
 This paper proposes an environment-adaptive sequential generalized likelihood ratio test (EA-SGLRT) that combines raw pseudorange consistency, receiver pseudorange diagnostics, and LiDAR--GNSS residuals under a threshold adapted by C/N0, DOP, satellite count, RTK ratio, and alignment quality.
 The detector accumulates multi-cue evidence with a CUSUM-style statistic and outputs confidence and anomaly type.
-On a reproducible \MatrixScenarioCount{}-scenario matrix built from a real rover dataset, including clean data, degraded non-attack data, and \MatrixAttackScenarioCount{} synthetic spoofing cases, the selected EA-SGLRT operating point reaches precision \AdaptiveSeqPrecision{}, recall \AdaptiveSeqRecall{}, and mean attack F1 \AdaptiveSeqFone{}.
+On a reproducible \MatrixScenarioCount{}-scenario matrix built from a real rover dataset, including clean data, degraded non-attack data, and \MatrixAttackScenarioCount{} synthetic spoofing cases, the selected EA-SGLRT operating point is calibrated from non-attack data under a \AdaptiveSeqFaBudget{} alarms/min budget and reaches precision \AdaptiveSeqPrecision{}, recall \AdaptiveSeqRecall{}, and mean attack F1 \AdaptiveSeqFone{}.
 Its main advantage is false-alarm control: it yields \AdaptiveSeqFalseAlarm{} false alarms/min versus \FixedFusedMatrixFalseAlarm{} for fixed fusion and \LioResidualFalseAlarm{} for the high-recall LiDAR--GNSS residual monitor.
 The paired comparison with fixed fusion gives mean F1 difference \AdaptiveVsFixedFoneGain{} with bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}], quantifying the cost of the conservative operating point.
 EA-SGLRT reduces false alarms relative to the LiDAR--GNSS residual monitor by \AdaptiveVsLioFalseAlarmReductionPercent{}\% and forms a \AdaptiveParetoStatus{} point on the F1/false-alarm frontier.
@@ -250,6 +250,7 @@ This design tests whether a detector separates adversarial consistency violation
 We compare EA-SGLRT with RAIM-only, robust RAIM with reference-residual evidence, EKF innovation gating, pseudorange GLRT-only, LiDAR--GNSS residual-only, fixed-threshold fused detection, fixed-threshold CUSUM fusion, adaptive non-sequential fused detection, and ablations that remove raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM.
 Metrics are computed per scenario and then averaged over the \MatrixAttackScenarioCount{} spoofing scenarios; false alarms/min are computed from the clean and degraded non-attack scenarios.
 Because a detector can trivially improve recall by alarming too often, we also report the Pareto frontier between mean attack F1 and mean false alarms/min across all baselines and ablations.
+The reported EA-SGLRT operating point is selected from the sensitivity grid using only the clean/degraded false-alarm budget: among configurations satisfying \AdaptiveSeqFaBudget{} alarms/min, the most sensitive CUSUM/adaptive-gain pair is used for the attack evaluation.
 For statistical comparison, each synthetic attack scenario is treated as a paired trial between EA-SGLRT and the fixed fused detector.
 EA-SGLRT changes F1 by \AdaptiveVsFixedFoneGain{} on average relative to the fixed fused detector, with bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}] and sign-test $p=\AdaptiveVsFixedPvalue{}$.
 
@@ -274,6 +275,21 @@ EA-SGLRT & \AdaptiveSeqPrecision{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFone{} &
 \end{tabular}
 \end{table}
 
+\begin{table}[!t]
+\centering
+\caption{Integrity-oriented operating metrics. PMD is one minus mean attack recall, TTA is mean time-to-alert, and the budget is \AdaptiveSeqFaBudget{} false alarms/min.}
+\label{tab:integrity}
+\begin{tabular}{lccc}
+\toprule
+Detector & PMD & TTA (s) & FA/min \\
+\midrule
+LIO--GNSS & \LioResidualMissedDetectionRate{} & \LioResidualTimeToAlert{} & \LioResidualFalseAlarm{} \\
+Fixed fused & \FixedFusedMissedDetectionRate{} & \FixedFusedTimeToAlert{} & \FixedFusedMatrixFalseAlarm{} \\
+EA-SGLRT & \AdaptiveSeqMissedDetectionRate{} & \AdaptiveSeqTimeToAlert{} & \AdaptiveSeqFalseAlarm{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \begin{figure}[!t]
     \centering
     \includegraphics[width=\linewidth]{adaptive_baseline_comparison.png}
@@ -283,7 +299,7 @@ EA-SGLRT & \AdaptiveSeqPrecision{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFone{} &
 
 Fig.~\ref{fig:pareto} shows why the false-alarm axis is necessary.
 The LiDAR--GNSS residual monitor has strong recall and the highest standalone F1, but it also generates \LioResidualFalseAlarm{} false alarms/min on clean/degraded non-attack data.
-EA-SGLRT intentionally selects a more conservative operating point: its F1 is \AdaptiveVsLioFoneDelta{} relative to LiDAR--GNSS-only, but it reduces mean false alarms by \AdaptiveVsLioFalseAlarmReductionPercent{}\% and remains \AdaptiveParetoStatus{} among the evaluated detectors.
+EA-SGLRT intentionally selects a false-alarm-budgeted operating point: its F1 is \AdaptiveVsLioFoneDelta{} relative to LiDAR--GNSS-only, but it reduces mean false alarms by \AdaptiveVsLioFalseAlarmReductionPercent{}\% relative to that high-recall monitor and by \AdaptiveVsFixedFalseAlarmReductionPercent{}\% relative to fixed fusion.
 This trade-off is the relevant operating regime for field deployment, where persistent false alerts under benign urban degradation are not acceptable.
 
 \begin{figure}[!t]
@@ -355,7 +371,7 @@ Removing raw GNSS drops F1 to \NoRawFone{} and removing LiDAR--GNSS consistency 
 Fig.~\ref{fig:sensitivity} sweeps the adaptive gain and CUSUM threshold.
 The best unconstrained grid point reaches F1 \SensitivityBestFone{} at gain \SensitivityBestGain{} and threshold \SensitivityBestCusum{}.
 The nominal false-alarm budget in this sweep is \SensitivityFaLimit{} alarms/min, and \SensitivityRowsWithinFaLimit{} tested configurations satisfy it.
-Within that budget, the best constrained point reaches F1 \SensitivityConstrainedFone{} at gain \SensitivityConstrainedGain{} and threshold \SensitivityConstrainedCusum{} with \SensitivityConstrainedFalseAlarm{} false alarms/min; the selected configuration is more conservative, with F1 \SensitivitySelectedFone{} and \SensitivitySelectedFalseAlarm{} false alarms/min.
+Within that budget, the selected non-attack-calibrated point reaches F1 \SensitivitySelectedFone{} at gain \SensitivityConstrainedGain{} and threshold \SensitivityConstrainedCusum{} with \SensitivitySelectedFalseAlarm{} false alarms/min.
 This finding is important for publication readiness: the proposed evidence model can move along a useful F1/false-alarm frontier, but final deployment thresholds should be calibrated with more clean/degraded routes and route-held-out tuning.
 
 \begin{figure}[!t]
@@ -371,7 +387,7 @@ Urban degradation and spoofing can both increase residuals, but they differ in h
 Benign degradation usually appears together with low C/N0, poor geometry, fewer reliable satellites, and weaker RTK quality; EA-SGLRT treats these as reasons to raise $\tau_t$ and to discount short-lived residual bursts.
 Spoofing, in contrast, is modeled as persistent cross-cue inconsistency: raw pseudorange residuals, receiver pseudorange diagnostics, and LiDAR--GNSS residuals should rise together after the ramp.
 The present results also show what the method has not yet solved.
-The full-data operating point is non-dominated because it trades lower false-alarm rate and higher precision for lower recall and F1 relative to fixed fusion; it is not a strict improvement on every axis.
+The full-data operating point is non-dominated because it satisfies the non-attack false-alarm budget while trading lower false-alarm rate and higher precision for lower recall and F1 relative to fixed fusion; it is not a strict improvement on every axis.
 This is consistent with the parameter sweep, where several low-false-alarm points exist but none simultaneously reaches the high recall of the LiDAR--GNSS residual monitor.
 The next version should therefore learn or calibrate the environment weights on separate clean/degraded routes, then evaluate on route-held-out spoofing scenarios.
 

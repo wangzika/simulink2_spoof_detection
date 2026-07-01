@@ -320,6 +320,7 @@ build/paper_platform/adaptive_experiments/attack_type_summary.csv
 build/paper_platform/adaptive_experiments/attack_strength_summary.csv
 build/paper_platform/adaptive_experiments/attack_ramp_summary.csv
 build/paper_platform/adaptive_experiments/environment_summary.csv
+build/paper_platform/adaptive_experiments/integrity_summary.csv
 build/paper_platform/adaptive_experiments/sensitivity_summary.csv
 build/paper_platform/adaptive_experiments/attack_classification_summary.csv
 build/paper_platform/adaptive_experiments/adaptive_timeline.csv
