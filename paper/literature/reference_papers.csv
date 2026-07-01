@@ -1,0 +1,24 @@
+key,title,pdf_url,filename,license_note
+fastlio2,FAST-LIO2 Fast Direct LiDAR-Inertial Odometry,https://arxiv.org/pdf/2107.06829,fastlio2_2022.pdf,author preprint
+seco2021replay,Detection of Replay Attacks to GNSS Based on Partial Correlations and Authentication Data Unpredictability,https://arxiv.org/pdf/2010.12502,seco_2021_replay_gnss.pdf,author preprint
+clements2022carrierimu,Carrier-Phase and IMU Based GNSS Spoofing Detection for Ground Vehicles,https://arxiv.org/pdf/2203.00140,clements_2022_carrier_imu.pdf,author preprint
+sathaye2021semperfi,SemperFi A Spoofer Eliminating GPS Receiver for UAVs,https://arxiv.org/pdf/2105.01860,sathaye_2021_semperfi.pdf,author preprint
+dasgupta2022sensorfusion,A Sensor Fusion-Based GNSS Spoofing Attack Detection Framework for Autonomous Vehicles,https://arxiv.org/pdf/2108.08635,dasgupta_2022_sensor_fusion.pdf,author preprint
+spravil2023nmea,Detecting Maritime GPS Spoofing Attacks Based on NMEA Sentence Integrity Monitoring,https://www.mdpi.com/2077-1312/11/5/928/pdf,spravil_2023_nmea.pdf,open access
+liu2024gmraim,Extending RAIM with a Gaussian Mixture of Opportunistic Information,https://arxiv.org/pdf/2402.03449,liu_2024_gmraim.pdf,author preprint
+chen2024d2sp,GNSS Spoofing Detection by Crowdsourcing Double Differential Pseudorange Spatial Distribution,https://arxiv.org/pdf/2404.02432,chen_2024_d2sp.pdf,author preprint
+johansson2025consumerins,Consumer INS Coupled with Carrier Phase Measurements for GNSS Spoofing Detection,https://arxiv.org/pdf/2502.03870,johansson_2025_consumer_ins.pdf,author preprint
+kriezis2025cots,GNSS Jamming and Spoofing Monitoring Using Low-Cost COTS Receivers,https://arxiv.org/pdf/2509.13600,kriezis_2025_cots.pdf,author preprint
+park2026ais,Wide-Area GNSS Spoofing and Jamming Detection Using AIS-Derived Spatiotemporal Integrity Monitoring,https://arxiv.org/pdf/2603.11055,park_2026_ais.pdf,author preprint
+jafarnia2012review,GPS Vulnerability to Spoofing Threats and a Review of Antispoofing Techniques,https://downloads.hindawi.com/journals/ijno/2012/127072.pdf,jafarnia_2012_gps_spoofing_review.pdf,open access
+wesson2017powerdistortion,GNSS Signal Authentication via Power and Distortion Monitoring,https://arxiv.org/pdf/1702.06554,wesson_2017_power_distortion.pdf,author preprint
+gross2017pdml,Signal Authentication by Power and Distortion Monitoring with Generalized Likelihood Ratio Testing,https://arxiv.org/pdf/1712.04501,gross_2017_pd_ml.pdf,author preprint
+suzuki2024multipath,Multipath and NLOS Detection in Urban Environments Using GNSS Signal Correlation Output,https://arxiv.org/pdf/2401.08054,suzuki_2024_multipath_nlos.pdf,author preprint
+dai2023chimera,Spoofing-Resilient LiDAR-GPS Factor Graph Localization with Chimera Authentication,https://arxiv.org/pdf/2307.04692,dai_2023_chimera_lidar_gps.pdf,author preprint
+ardizzon2023crossauth,Satellite Cross-Authentication Against GNSS Spoofing Attacks,https://arxiv.org/pdf/2304.02977,ardizzon_2023_cross_authentication.pdf,author preprint
+dasgupta2024experimental,Experimental Evaluation of GNSS Spoofing Attack Detection Frameworks for Autonomous Vehicles,https://arxiv.org/pdf/2401.01304,dasgupta_2024_experimental_evaluation.pdf,author preprint
+dasgupta2024slowdrift,Slow-Drift GNSS Spoofing Attack Detection for Autonomous Vehicles,https://arxiv.org/pdf/2401.01394,dasgupta_2024_slow_drift.pdf,author preprint
+risbud2018smartgrid,Aviation GPS Spoofing Detection Based on COTS Aviation Receivers for Smart Grid Timing Security,https://arxiv.org/pdf/1804.09310,risbud_2018_aviation_smart_grid.pdf,author preprint
+zheng2023hapsraim,Hybrid ARAIM and Signal Quality Monitoring for GNSS Spoofing Detection,https://arxiv.org/pdf/2301.00758,zheng_2023_hybrid_araim_sqm.pdf,author preprint
+androjna2020maritime,Assessing Cyber Challenges of Maritime Navigation,https://www.mdpi.com/2077-1312/8/10/776/pdf,androjna_2020_maritime_cyber.pdf,open access
+leite2021gnsssd,GNSSSD A Dataset for GNSS Spoofing Detection in Autonomous Vehicles,https://www.mdpi.com/1424-8220/21/9/3195/pdf,leite_2021_gnsssd_dataset.pdf,open access

@@ -1,6 +1,7 @@
 # Build outputs and generated simulation artifacts
 /build/
 /tmp/
+/paper/literature/papers/*.pdf
 /simulation.csv
 /dashboard.html
 /imgui.ini

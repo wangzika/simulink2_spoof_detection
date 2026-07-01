@@ -22,6 +22,7 @@
 - Route split：`tools/route_split_experiments.py` 支持多 route detection CSV，train-route 调参、test-route 评估，输出 tuning/test/train/detector summary。
 - Route registry：`datasets/routes.yaml` 记录 route 数据源、train/test split 和实验矩阵；`tools/run_configured_routes.py` 可从配置直接生成 route-held-out 结果和 manifest。
 - 投稿审计：`tools/submission_readiness_audit.py` 自动检查 GPS Solutions 投稿格式、摘要词数、声明、图件、实验输出和仍未补齐的科学证据。
+- 文献下载：`paper/literature/reference_papers.csv` 和 `tools/download_reference_papers.py` 记录并下载开放获取/作者预印本 PDF；PDF 本体不提交 git。
 - 论文级补充统计：按 attack type/strength/ramp 分组、clean vs degraded 误报分解、EA-SGLRT 参数敏感性、攻击解释类型摘要、paired bootstrap/sign-test。
 - GPS week/TOW 到 Unix 时间的转换，默认 GPST-UTC = 18 s。
 - 合成欺骗窗口注入：位置残差偏移、伪距延迟、ramp-in/ramp-out。
@@ -160,6 +161,7 @@ build/paper_platform/time_split_experiments/time_split_summary.md
 
 LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编译结果在 `paper/build/main.pdf`。
 投稿审计报告在 `docs/submission_readiness.md`，机器可读结果在 `build/paper_platform/submission_readiness.json`。
+文献下载清单在 `paper/literature/reference_papers.csv`，本地 PDF 默认写到 `paper/literature/papers/`。
 
 ## Phase 2: 原始 GNSS 观测层
 

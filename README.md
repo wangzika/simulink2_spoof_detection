@@ -197,6 +197,7 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
 - `docs/gnss_spoofing_literature.md` summarizes GNSS spoofing/jamming detection literature by method family for the Related Work section.
 - `docs/paper_draft.md` contains the initial paper draft skeleton.
+- `paper/literature/reference_papers.csv` and `tools/download_reference_papers.py` reproduce the open-PDF literature download set used to expand the bibliography.
 
 Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO logs are present:
 
@@ -220,6 +221,14 @@ The GPS Solutions readiness audit is written to `docs/submission_readiness.md`:
 ```bash
 cmake --build build --target paper_submission_audit
 ```
+
+Download open-access or author-preprint literature PDFs:
+
+```bash
+python3 tools/download_reference_papers.py
+```
+
+PDFs are written to `paper/literature/papers/` and ignored by git; the tracked manifest is `paper/literature/reference_papers.csv`.
 
 Extract raw RINEX observation features directly:
 

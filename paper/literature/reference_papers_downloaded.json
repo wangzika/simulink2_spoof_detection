@@ -1,0 +1,228 @@
+[
+  {
+    "key": "fastlio2",
+    "title": "FAST-LIO2 Fast Direct LiDAR-Inertial Odometry",
+    "url": "https://arxiv.org/pdf/2107.06829",
+    "file": "paper/literature/papers/fastlio2_2022.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 13481318,
+    "sha256": "ba5072e06e75dec5222bcb528143f3aa3238d6f6692bac1e22a9fe1bc55a15dd"
+  },
+  {
+    "key": "seco2021replay",
+    "title": "Detection of Replay Attacks to GNSS Based on Partial Correlations and Authentication Data Unpredictability",
+    "url": "https://arxiv.org/pdf/2010.12502",
+    "file": "paper/literature/papers/seco_2021_replay_gnss.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 807503,
+    "sha256": "4a129943fdfca708225140069652df53389e0d71b637cd2ae2f0ec97076c2f11"
+  },
+  {
+    "key": "clements2022carrierimu",
+    "title": "Carrier-Phase and IMU Based GNSS Spoofing Detection for Ground Vehicles",
+    "url": "https://arxiv.org/pdf/2203.00140",
+    "file": "paper/literature/papers/clements_2022_carrier_imu.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 40446612,
+    "sha256": "a2d15bbef0d25797f51aa0e807f326f7ab197d2f41439fa3b77c456d2ab4fe73"
+  },
+  {
+    "key": "sathaye2021semperfi",
+    "title": "SemperFi A Spoofer Eliminating GPS Receiver for UAVs",
+    "url": "https://arxiv.org/pdf/2105.01860",
+    "file": "paper/literature/papers/sathaye_2021_semperfi.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 3888572,
+    "sha256": "612a20c0604f9382728dc2f9b524a9ee77edf2de909590b8fc49f296c6d879b7"
+  },
+  {
+    "key": "dasgupta2022sensorfusion",
+    "title": "A Sensor Fusion-Based GNSS Spoofing Attack Detection Framework for Autonomous Vehicles",
+    "url": "https://arxiv.org/pdf/2108.08635",
+    "file": "paper/literature/papers/dasgupta_2022_sensor_fusion.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 2911094,
+    "sha256": "f2f2b0d6bb018e815a1dc70180843ec2af4692065d3a854018db3a0c2ce08fc2"
+  },
+  {
+    "key": "spravil2023nmea",
+    "title": "Detecting Maritime GPS Spoofing Attacks Based on NMEA Sentence Integrity Monitoring",
+    "url": "https://www.mdpi.com/2077-1312/11/5/928/pdf",
+    "file": "paper/literature/papers/spravil_2023_nmea.pdf",
+    "license_note": "open access",
+    "status": "failed",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "key": "liu2024gmraim",
+    "title": "Extending RAIM with a Gaussian Mixture of Opportunistic Information",
+    "url": "https://arxiv.org/pdf/2402.03449",
+    "file": "paper/literature/papers/liu_2024_gmraim.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 784340,
+    "sha256": "c07f7873d4ffbd1b7a91d28260a6e5a3cb22eb2e18cdea35b1bf5cd26f493e91"
+  },
+  {
+    "key": "chen2024d2sp",
+    "title": "GNSS Spoofing Detection by Crowdsourcing Double Differential Pseudorange Spatial Distribution",
+    "url": "https://arxiv.org/pdf/2404.02432",
+    "file": "paper/literature/papers/chen_2024_d2sp.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 9521494,
+    "sha256": "4937206e5bdd86ecf53699e29e50589d6b9c96fa5584baf8950a09921cb302b9"
+  },
+  {
+    "key": "johansson2025consumerins",
+    "title": "Consumer INS Coupled with Carrier Phase Measurements for GNSS Spoofing Detection",
+    "url": "https://arxiv.org/pdf/2502.03870",
+    "file": "paper/literature/papers/johansson_2025_consumer_ins.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 12867169,
+    "sha256": "b9773d1f88ab98e8d143a0515d0ebda8f9005807bed69318f19ce210695000b7"
+  },
+  {
+    "key": "kriezis2025cots",
+    "title": "GNSS Jamming and Spoofing Monitoring Using Low-Cost COTS Receivers",
+    "url": "https://arxiv.org/pdf/2509.13600",
+    "file": "paper/literature/papers/kriezis_2025_cots.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 1283418,
+    "sha256": "86fcc9ce50fc7a66ce5bb6a967ee52d2d94e3275dae4a35c0d2a93bbe2af494d"
+  },
+  {
+    "key": "park2026ais",
+    "title": "Wide-Area GNSS Spoofing and Jamming Detection Using AIS-Derived Spatiotemporal Integrity Monitoring",
+    "url": "https://arxiv.org/pdf/2603.11055",
+    "file": "paper/literature/papers/park_2026_ais.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 1503423,
+    "sha256": "ba52ceb9ee61d149d42fcaf7da9668c3b7adf9b199a0a75f32576f38b5ceb627"
+  },
+  {
+    "key": "jafarnia2012review",
+    "title": "GPS Vulnerability to Spoofing Threats and a Review of Antispoofing Techniques",
+    "url": "https://downloads.hindawi.com/journals/ijno/2012/127072.pdf",
+    "file": "paper/literature/papers/jafarnia_2012_gps_spoofing_review.pdf",
+    "license_note": "open access",
+    "status": "failed",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "key": "wesson2017powerdistortion",
+    "title": "GNSS Signal Authentication via Power and Distortion Monitoring",
+    "url": "https://arxiv.org/pdf/1702.06554",
+    "file": "paper/literature/papers/wesson_2017_power_distortion.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 898095,
+    "sha256": "2ad0f1745378f6850767fcce4af942aa52764e2076c281fd13b112f73cf91518"
+  },
+  {
+    "key": "gross2017pdml",
+    "title": "Signal Authentication by Power and Distortion Monitoring with Generalized Likelihood Ratio Testing",
+    "url": "https://arxiv.org/pdf/1712.04501",
+    "file": "paper/literature/papers/gross_2017_pd_ml.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 757284,
+    "sha256": "1aba1c8fec00e7af0518a1eb0fb7c294350e43cca47843dac40396a1f09ec4b3"
+  },
+  {
+    "key": "suzuki2024multipath",
+    "title": "Multipath and NLOS Detection in Urban Environments Using GNSS Signal Correlation Output",
+    "url": "https://arxiv.org/pdf/2401.08054",
+    "file": "paper/literature/papers/suzuki_2024_multipath_nlos.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 2025783,
+    "sha256": "3b1180e88eb51296edc749faa737f44d511886b495e1462db38bacd1e16c9d39"
+  },
+  {
+    "key": "dai2023chimera",
+    "title": "Spoofing-Resilient LiDAR-GPS Factor Graph Localization with Chimera Authentication",
+    "url": "https://arxiv.org/pdf/2307.04692",
+    "file": "paper/literature/papers/dai_2023_chimera_lidar_gps.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 1463284,
+    "sha256": "2c8688c174c2f24d885e191179d3248bf48350eb41ac2f6e72178fc55f0c3e95"
+  },
+  {
+    "key": "ardizzon2023crossauth",
+    "title": "Satellite Cross-Authentication Against GNSS Spoofing Attacks",
+    "url": "https://arxiv.org/pdf/2304.02977",
+    "file": "paper/literature/papers/ardizzon_2023_cross_authentication.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 8095079,
+    "sha256": "dd370b891678d95255c6de78275d7b38062a9412629633a6a0426fb034332ea2"
+  },
+  {
+    "key": "dasgupta2024experimental",
+    "title": "Experimental Evaluation of GNSS Spoofing Attack Detection Frameworks for Autonomous Vehicles",
+    "url": "https://arxiv.org/pdf/2401.01304",
+    "file": "paper/literature/papers/dasgupta_2024_experimental_evaluation.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 1497370,
+    "sha256": "460124b8f0409478aad92dd150c6ac916ef585bb34e81ce67198258f4f462414"
+  },
+  {
+    "key": "dasgupta2024slowdrift",
+    "title": "Slow-Drift GNSS Spoofing Attack Detection for Autonomous Vehicles",
+    "url": "https://arxiv.org/pdf/2401.01394",
+    "file": "paper/literature/papers/dasgupta_2024_slow_drift.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 1574863,
+    "sha256": "e8d2894b1e5f8163ee4633e170732ee87c2bd7a461e4d4106e70417019f2280c"
+  },
+  {
+    "key": "risbud2018smartgrid",
+    "title": "Aviation GPS Spoofing Detection Based on COTS Aviation Receivers for Smart Grid Timing Security",
+    "url": "https://arxiv.org/pdf/1804.09310",
+    "file": "paper/literature/papers/risbud_2018_aviation_smart_grid.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 5358778,
+    "sha256": "0813eb543b913eda1ac714134ae7f9a27014253940bd32c6c58434660cbf8d5e"
+  },
+  {
+    "key": "zheng2023hapsraim",
+    "title": "Hybrid ARAIM and Signal Quality Monitoring for GNSS Spoofing Detection",
+    "url": "https://arxiv.org/pdf/2301.00758",
+    "file": "paper/literature/papers/zheng_2023_hybrid_araim_sqm.pdf",
+    "license_note": "author preprint",
+    "status": "exists",
+    "bytes": 1362702,
+    "sha256": "255d4f1d7910f35a2b53e20e20e8267a834ed22c4cc6a782c340dfbde9d40ce4"
+  },
+  {
+    "key": "androjna2020maritime",
+    "title": "Assessing Cyber Challenges of Maritime Navigation",
+    "url": "https://www.mdpi.com/2077-1312/8/10/776/pdf",
+    "file": "paper/literature/papers/androjna_2020_maritime_cyber.pdf",
+    "license_note": "open access",
+    "status": "failed",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "key": "leite2021gnsssd",
+    "title": "GNSSSD A Dataset for GNSS Spoofing Detection in Autonomous Vehicles",
+    "url": "https://www.mdpi.com/1424-8220/21/9/3195/pdf",
+    "file": "paper/literature/papers/leite_2021_gnsssd_dataset.pdf",
+    "license_note": "open access",
+    "status": "failed",
+    "error": "HTTP Error 403: Forbidden"
+  }
+]

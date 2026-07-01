@@ -54,9 +54,11 @@ The contributions are:
 \end{itemize}
 
 \section{Related Work}
-The modern spoofing threat was made concrete by portable civilian-spoofer demonstrations~\cite{humphreys2008spoofer}, which motivated receiver-autonomous defenses at several layers.
+The modern spoofing threat was made concrete by portable civilian-spoofer demonstrations~\cite{humphreys2008spoofer}, broad vulnerability reviews~\cite{jafarnia2012review}, and receiver-level analyses of spoofing mechanisms and detection limits~\cite{psiaki2016gnss}.
+These works motivated receiver-autonomous defenses at several layers.
 Signal- and receiver-level monitors examine received power, automatic gain control, C/N0 changes, correlation distortion, or authenticated navigation data.
-AGC monitoring can expose overpowering spoofers with minimal computation~\cite{akos2012agc}, and authentication-aided techniques use unpredictable data symbols or partial correlations to detect replay attacks~\cite{seco2021replay}.
+AGC monitoring can expose overpowering spoofers with minimal computation~\cite{akos2012agc}, while power-distortion monitoring and GLRT formulations provide more explicit signal-shape tests~\cite{wesson2017powerdistortion,gross2017pdml}.
+Authentication-aided techniques use unpredictable data symbols, cross-authentication, or partial correlations to detect replay and spoofing attacks~\cite{seco2021replay,ardizzon2023crossauth}.
 More active receiver designs can suppress spoofers in UAV settings~\cite{sathaye2021semperfi}.
 These approaches are powerful when receiver internals or authentication signals are available, but they are less convenient for post-processing RINEX/RTK/LiDAR logs or for commodity receivers that expose only navigation and observation products.
 
@@ -67,13 +69,17 @@ Wide-area maritime monitors use AIS-derived motion consistency to detect spoofin
 These methods provide strong evidence, but they require antenna baselines, cooperative users, or external vessel/traffic infrastructure that is not always available for a single ground robot.
 
 Measurement-level integrity monitoring is closer to the interface used in this paper.
-Classical RAIM and GLRT-style residual tests are transparent and receiver-output compatible, and recent work augments RAIM with opportunistic information models~\cite{liu2024gmraim}.
+Classical RAIM uses pseudorange residuals for autonomous integrity monitoring~\cite{parkinson1988raim,brown1992raim}.
+RAIM and GLRT-style residual tests are transparent and receiver-output compatible, and recent work augments RAIM with opportunistic information models or hybrid signal-quality monitoring~\cite{liu2024gmraim,zheng2023hapsraim}.
 Low-cost COTS monitoring has also shown that commodity receiver outputs can detect jamming and spoofing signatures~\cite{kriezis2025cots}.
-However, fixed residual thresholds are sensitive to C/N0, DOP, satellite visibility, multipath, and RTK ambiguity state.
+However, fixed residual thresholds are sensitive to C/N0, DOP, satellite visibility, multipath, non-line-of-sight reception, and RTK ambiguity state~\cite{suzuki2024multipath}.
 This sensitivity is precisely why a high-recall baseline can suffer low precision under degraded but non-attack conditions.
 
 Cross-modal defenses compare GNSS with inertial, vehicle, or other navigation sensors.
 Carrier phase with IMU constraints improves ground-vehicle spoofing detection~\cite{clements2022carrierimu}, consumer INS can be coupled with carrier phase for low-cost detection~\cite{johansson2025consumerins}, and autonomous-vehicle frameworks fuse GNSS with onboard sensors to identify spoofing attacks~\cite{dasgupta2022sensorfusion}.
+Recent autonomous-vehicle studies further evaluate such frameworks under experimental and slow-drift attack settings~\cite{dasgupta2024experimental,dasgupta2024slowdrift}.
+GNSS authentication can also be combined with factor-graph LiDAR--GPS localization~\cite{dai2023chimera}.
+Dataset and application studies in autonomous vehicles, smart-grid timing, and maritime navigation emphasize that spoofing evidence should be evaluated under operational context rather than in isolated residual channels~\cite{leite2021gnsssd,risbud2018smartgrid,androjna2020maritime}.
 These works motivate our use of LiDAR--inertial consistency, but many systems still use static decision gates or do not explicitly model benign environmental degradation.
 Our contribution is therefore a deployable measurement/navigation-layer detector using RINEX observations~\cite{rinex304}, RTKLIB products~\cite{rtklib}, and LiDAR--inertial diagnostics inspired by FAST-LIO2~\cite{fastlio2}, with an environment-adaptive threshold and sequential GLRT accumulation to separate persistent spoofing evidence from urban-quality degradation.
 
