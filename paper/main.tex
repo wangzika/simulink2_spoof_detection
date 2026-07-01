@@ -31,7 +31,7 @@ EA-SGLRT reduces false alarms relative to the LiDAR--GNSS residual monitor by \A
 \end{abstract}
 
 \begin{IEEEkeywords}
-GNSS spoofing detection, sequential GLRT, RAIM, RINEX, LiDAR--inertial odometry, adaptive thresholding.
+GNSS spoofing detection, sequential GLRT, RAIM, raw GNSS observations, LiDAR--inertial odometry.
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -122,6 +122,25 @@ Fig.~\ref{fig:methodflow} gives the algorithmic flow.
     \caption{EA-SGLRT method flow. Raw GNSS, receiver diagnostics, LiDAR--inertial consistency, and environment-quality features are normalized into cue scores. A multi-cue consistency gate rejects isolated residual excursions, while the environment index raises the effective evidence requirement before CUSUM confirmation reports detection, confidence, and anomaly type.}
     \label{fig:methodflow}
 \end{figure}
+
+\subsection{Threat Model and Operating Assumptions}
+The detector is designed for receiver-output and post-processing settings rather than for direct RF front-end authentication.
+The adversary is assumed to bias code observations or the GNSS navigation solution in a way that can be abrupt, ramped, coordinated across satellites, or concentrated on one satellite.
+The attack goal is to move the navigation solution while preserving plausible receiver products long enough to bypass a fixed residual threshold.
+The adversary is not assumed to compromise the LiDAR--inertial odometry pipeline, the RTK base station, or the offline RINEX/RTKLIB processing software.
+This is a realistic scope for a ground robot or mapping platform that logs receiver observations and independent odometry but does not expose correlator-level measurements.
+
+The null hypothesis deliberately includes non-attack degradation.
+Urban multipath, satellite blockage, low C/N0, high DOP, RTK fixed-to-float transitions, and LiDAR--inertial alignment transients can all produce large residuals without spoofing.
+Therefore a detector that alarms whenever one residual exceeds a fixed threshold is not sufficient for field use.
+The proposed test treats environmental degradation as a nuisance process that changes the expected residual distribution and the amount of evidence required for an alarm.
+In contrast, spoofing is modeled as a persistent cross-cue inconsistency: raw observation residuals, receiver pseudorange diagnostics, and LiDAR--GNSS residuals should become mutually inconsistent with the same navigation state.
+The method therefore emphasizes agreement among cue families and persistence over time, not the largest single residual sample.
+
+This threat model also explains the main limitation of the current validation.
+Observation-level injection is useful because it preserves the real route, satellite geometry, C/N0, DOP, and odometry sequence, but it cannot reproduce every RF receiver behavior of a live spoofer.
+The current experiments should therefore be interpreted as a controlled measurement/navigation-layer validation.
+A final field-ready claim still requires independent routes and real or replayed spoofing data.
 
 \subsection{Observation and Residual Model}
 For satellite $i$ at epoch $t$, the code observation can be written as
@@ -258,6 +277,23 @@ The first \TemporalHoldoutTrainRows{} synchronized rows, up to original time \Te
 Within each segment, attack windows are re-zeroed to the segment start before synthetic spoofing is applied.
 The EA-SGLRT CUSUM threshold and adaptive gain are selected using only clean/degraded non-attack calibration data with a conservative \TemporalHoldoutCalibrationFaLimit{} alarms/min calibration target for a \TemporalHoldoutFinalFaBudget{} alarms/min held-out operating budget.
 This is weaker than independent route-held-out validation, but it prevents direct train/test reuse on the current single route.
+
+\subsection{Metrics and Operating Point Selection}
+The evaluation reports precision, recall, F1, missed-detection probability (PMD), time-to-alert (TTA), and false alarms per minute.
+Precision measures how often detector alarms occur inside spoofing windows, while recall measures the fraction of attacked samples that are detected.
+F1 is useful for comparing balanced classification behavior, but it is not sufficient for spoofing monitoring because a detector can improve recall by alarming continuously under benign degradation.
+For this reason, the primary operating criterion in this draft is false-alarm-constrained detection.
+Non-attack clean and degraded scenarios define the false-alarm budget, and attack scenarios are then evaluated at the selected operating point.
+
+PMD is reported as $1-\mathrm{recall}$ to align the results with integrity-monitoring language.
+TTA is computed from attack start to the first in-window alarm for scenarios that are detected; missed scenarios are reflected through PMD rather than assigned an artificial delay.
+False alarms per minute are computed only on non-attack scenarios, so the metric penalizes alarms on clean and degraded routes without mixing them with attack-window detections.
+The sensitivity grid over adaptive gain and CUSUM threshold is used to show that EA-SGLRT can trade recall for false-alarm control.
+The selected point is the most sensitive configuration satisfying the non-attack budget, rather than the configuration with the best attack F1.
+This conservative rule is important for the paper's claim: the contribution is not that the proposed detector dominates all baselines on every metric, but that it exposes and controls the false-alarm failure mode of fixed fusion while retaining interpretable spoofing evidence.
+The same selection rule is used when reporting temporal held-out validation.
+This avoids choosing a permissive detector because it happens to score well on the injected attacks in the test segment.
+In later multi-route experiments and datasets, the identical protocol should be applied with all threshold choices made on training routes and all headline metrics reported only on held-out routes.
 
 \begin{table}[!t]
 \centering
@@ -423,6 +459,24 @@ Slow-drift attacks are hardest because they deliberately keep instantaneous resi
 Single-satellite outliers are easier for pseudorange monitors, so the gain over fixed fusion is smaller than for coordinated or pseudorange-delay attacks.
 The explanatory anomaly type is stable in most detected samples, with dominant-cue fraction \AttackClassificationDominantFraction{}, but it should be interpreted as a diagnosis of which cue fired rather than a final semantic attack classifier.
 
+\subsection{Reproducibility and Safety Considerations}
+The repository is organized so that each numerical claim in the manuscript can be regenerated from explicit targets rather than from manually edited figures.
+The RTKLIB post-processing target regenerates the rover trajectory, the RINEX feature target regenerates satellite-level observations, the raw residual target recomputes broadcast-ephemeris residuals, and the experiment-matrix target rewrites the detector comparisons and ablations.
+The figure-generation target then converts these machine-readable outputs into the plots and LaTeX macros used by the manuscript.
+This separation is important because spoofing-detection results are sensitive to synchronization gates, residual scaling, and false-alarm definitions.
+Keeping these steps scripted reduces the risk of reporting a detector result that no longer corresponds to the plotted operating point.
+
+The attack injector is intentionally limited to offline observation and detection tables.
+It does not transmit RF signals, control a live receiver, or provide a complete recipe for over-the-air spoofing.
+Its purpose is to stress the measurement and navigation layers under known pseudorange biases while retaining the real route, satellite geometry, and odometry context.
+This makes the experiments reproducible and safer than live RF tests, but it also limits the strength of the validation.
+For an operational safety claim, the same detector should be tested on replayed RF data or on legally controlled spoofing trials with appropriate authorization.
+
+The data-release plan should also match this distinction.
+The repository can publish code, derived experiment tables, figures, configuration files, and synthetic-injection parameters directly.
+Raw field logs may need anonymization or separate access instructions because they can encode collection location, receiver metadata, and platform motion.
+A final journal package should therefore include either an anonymized derived dataset or a clear data-access statement that allows reviewers to reproduce the reported tables without exposing sensitive raw collection details.
+
 \section{Limitations}
 The current raw residual engine uses GPS and Galileo in the main experiments, while BeiDou remains experimental pending GEO/IGSO/MEO-specific corrections and inter-system calibration.
 The rover RINEX stream does not expose Doppler observations in the synchronized interval, so Doppler/TDCP is not yet fully exploited.
@@ -441,6 +495,33 @@ The implementation is fully reproducible from the repository targets, including 
 The current results show a clear false-alarm reduction relative to fixed fusion and the high-recall LiDAR--GNSS monitor, while also exposing the recall loss caused by strict consistency gating.
 The Pareto and sensitivity analyses therefore clarify the remaining research problem: recovering weak-attack recall while keeping the low-false-alarm behavior of the raw/cross-modal consistency detector.
 The next research step is BeiDou-specific raw residual calibration, route-held-out validation, and real or replayed spoofing evaluation on longer degraded field sequences.
+
+\section*{Statements and Declarations}
+\textbf{Funding.}
+No external funding has been declared for this draft.
+
+\textbf{Competing interests.}
+The author declares no competing interests.
+
+\textbf{Author contributions.}
+Zhibo Wang designed the platform, implemented the algorithms, performed the experiments, and prepared the manuscript draft.
+
+\textbf{Data availability.}
+The raw field logs used in the present draft include locally collected GNSS, RTKLIB, and LiDAR--inertial data and are not redistributed with the repository.
+Derived experiment tables, scripts, figures, and reproducibility commands are generated by the repository targets described in the manuscript.
+An anonymized derived dataset or access instructions should be prepared before journal submission.
+
+\textbf{Code availability.}
+The research code is maintained at \url{https://github.com/wangzika/simulink2_spoof_detection}.
+The exact revision used for a submitted manuscript should be recorded at submission time.
+
+\textbf{Ethics approval and consent to participate.}
+Not applicable.
+The experiments use vehicle/receiver sensor logs and synthetic observation-level spoofing injection, without human-subject data.
+
+\textbf{Use of AI tools.}
+An AI coding assistant was used for implementation assistance, experiment orchestration, and editorial drafting support.
+The author reviewed the generated code, analyses, and manuscript text and takes responsibility for the final content.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

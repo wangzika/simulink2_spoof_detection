@@ -435,6 +435,16 @@ if (Python3_EXECUTABLE)
                 COMMENT "Build the LaTeX paper PDF"
                 VERBATIM
             )
+            add_custom_target(paper_submission_audit
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/submission_readiness_audit.py
+                    --output-json ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/submission_readiness.json
+                    --output-md ${CMAKE_CURRENT_SOURCE_DIR}/docs/submission_readiness.md
+                DEPENDS paper_pdf
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Audit GPS Solutions submission readiness"
+                VERBATIM
+            )
         endif()
     endif()
 else()

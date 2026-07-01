@@ -52,6 +52,7 @@ flowchart LR
     K --> L["generate_paper_figures.py"]
     L --> M["paper/figures + generated_metrics.tex"]
     M --> N["paper/main.tex -> paper/build/main.pdf"]
+    N --> P["submission_readiness_audit.py"]
 ```
 
 核心思想是把多源数据统一到同一个 detection CSV，再围绕这个 CSV 做算法、评测和论文复现。
@@ -649,6 +650,7 @@ cmake --build build --target route_split_experiments
 cmake --build build --target configured_route_experiments
 cmake --build build --target paper_figures
 cmake --build build --target paper_pdf
+cmake --build build --target paper_submission_audit
 cmake --build build --target rerun_view
 cmake --build build --target rerun_record
 cmake --build build --target paper_rerun_record
@@ -669,6 +671,8 @@ build/paper_platform/...
 paper/figures/*.png
 paper/generated_metrics.tex
 paper/build/main.pdf
+docs/submission_readiness.md
+build/paper_platform/submission_readiness.json
 ```
 
 ## 9. 论文文件
@@ -693,7 +697,22 @@ paper/build/main.pdf
 - Parameter Sensitivity；
 - Discussion；
 - Limitations；
-- Conclusion。
+- Conclusion；
+- Statements and Declarations。
+
+投稿辅助材料：
+
+```text
+docs/submission_readiness.md
+paper/gps_solutions_cover_letter.md
+```
+
+`docs/submission_readiness.md` 由 `tools/submission_readiness_audit.py` 生成，会明确区分：
+
+- 已通过的工程/格式项；
+- 仍需人工准备的 Word 投稿稿；
+- 真实多 route、真实或 replay spoofing 等科学证据缺口；
+- 需要投稿前再次确认的 Springer/GPS Solutions 官方要求。
 
 论文图由 `tools/generate_paper_figures.py` 生成，包括：
 
@@ -863,6 +882,7 @@ ctest --test-dir build --output-on-failure
 ```bash
 cmake --build build --target paper_figures
 cmake --build build --target paper_pdf
+cmake --build build --target paper_submission_audit
 ```
 
 准备阶段性提交：

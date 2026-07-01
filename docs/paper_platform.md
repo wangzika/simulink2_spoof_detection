@@ -21,6 +21,7 @@
 - Temporal split：`tools/time_split_experiments.py` 支持单 route 时间留出验证，前段只用于 clean/degraded 非攻击阈值校准，后段作为 held-out test 报告。
 - Route split：`tools/route_split_experiments.py` 支持多 route detection CSV，train-route 调参、test-route 评估，输出 tuning/test/train/detector summary。
 - Route registry：`datasets/routes.yaml` 记录 route 数据源、train/test split 和实验矩阵；`tools/run_configured_routes.py` 可从配置直接生成 route-held-out 结果和 manifest。
+- 投稿审计：`tools/submission_readiness_audit.py` 自动检查 GPS Solutions 投稿格式、摘要词数、声明、图件、实验输出和仍未补齐的科学证据。
 - 论文级补充统计：按 attack type/strength/ramp 分组、clean vs degraded 误报分解、EA-SGLRT 参数敏感性、攻击解释类型摘要、paired bootstrap/sign-test。
 - GPS week/TOW 到 Unix 时间的转换，默认 GPST-UTC = 18 s。
 - 合成欺骗窗口注入：位置残差偏移、伪距延迟、ramp-in/ramp-out。
@@ -111,6 +112,7 @@ cmake --build build --target route_split_experiments
 cmake --build build --target configured_route_experiments
 cmake --build build --target paper_figures
 cmake --build build --target paper_pdf
+cmake --build build --target paper_submission_audit
 ```
 
 多路线配置入口：
@@ -157,6 +159,7 @@ build/paper_platform/time_split_experiments/time_split_summary.md
 该结果可以作为当前单条数据下的泛化 sanity check，但论文最终强结论仍应以多 route held-out 为准。
 
 LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编译结果在 `paper/build/main.pdf`。
+投稿审计报告在 `docs/submission_readiness.md`，机器可读结果在 `build/paper_platform/submission_readiness.json`。
 
 ## Phase 2: 原始 GNSS 观测层
 
@@ -222,6 +225,8 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 最终要输出：
 
 - 英文论文初稿。
+- GPS Solutions Word-format 投稿稿。
 - 图表：平台架构、时间同步、攻击模型、检测状态机、ROC/PR 曲线、时延箱线图、轨迹可视化。
 - 可复现实验命令和结果表。
 - 数据说明和伦理/安全说明。
+- 投稿审计报告和 cover letter 草稿。
