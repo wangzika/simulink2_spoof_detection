@@ -1,5 +1,6 @@
 # Build outputs and generated simulation artifacts
 /build/
+/tmp/
 /simulation.csv
 /dashboard.html
 /imgui.ini

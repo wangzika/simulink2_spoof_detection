@@ -18,6 +18,7 @@
 - 实验矩阵：clean real data、degraded non-attack data、80 个 synthetic spoofing case，覆盖 1/2/5/10 m 强度、1/5/20/60 s ramp、position bias/pseudorange delay/single-satellite outlier/coordinated spoof/slow drift 五类攻击。
 - Baseline/ablation：RAIM-only、robust RAIM、EKF innovation、pseudorange GLRT-only、LIO-GNSS-only、fixed fused、fixed CUSUM fused、adaptive fused、EA-SGLRT、no raw、no LIO、no environment、no CUSUM。
 - ML baseline：`tools/ml_baseline.py` 提供无 sklearn 依赖的浅树集成分类器，`route_split_experiments.py` 可在 train routes 上训练并在 test routes 上作为 optional baseline 对比。
+- Temporal split：`tools/time_split_experiments.py` 支持单 route 时间留出验证，前段只用于 clean/degraded 非攻击阈值校准，后段作为 held-out test 报告。
 - Route split：`tools/route_split_experiments.py` 支持多 route detection CSV，train-route 调参、test-route 评估，输出 tuning/test/train/detector summary。
 - Route registry：`datasets/routes.yaml` 记录 route 数据源、train/test split 和实验矩阵；`tools/run_configured_routes.py` 可从配置直接生成 route-held-out 结果和 manifest。
 - 论文级补充统计：按 attack type/strength/ramp 分组、clean vs degraded 误报分解、EA-SGLRT 参数敏感性、攻击解释类型摘要、paired bootstrap/sign-test。
@@ -105,6 +106,7 @@ cmake --build build --target paper_eval_attack
 cmake --build build --target paper_eval_clean
 cmake --build build --target paper_pipeline
 cmake --build build --target adaptive_experiments
+cmake --build build --target time_split_experiments
 cmake --build build --target route_split_experiments
 cmake --build build --target configured_route_experiments
 cmake --build build --target paper_figures
@@ -128,6 +130,31 @@ build/paper_platform/configured_route_experiments/test_results.csv
 build/paper_platform/configured_route_experiments/detector_summary.csv
 build/paper_platform/configured_route_experiments/route_split_summary.json
 ```
+
+单路线时间留出入口：
+
+```bash
+python tools/time_split_experiments.py \
+  --base-csv build/paper_platform/full_data_clean/full_data_clean_detection.csv \
+  --output-dir build/paper_platform/time_split_experiments \
+  --train-fraction 0.60 \
+  --operating-fa-limit 6.0
+```
+
+主要输出：
+
+```text
+build/paper_platform/time_split_experiments/calibration_segment.csv
+build/paper_platform/time_split_experiments/heldout_test_segment.csv
+build/paper_platform/time_split_experiments/tuning_summary.csv
+build/paper_platform/time_split_experiments/train_results.csv
+build/paper_platform/time_split_experiments/test_results.csv
+build/paper_platform/time_split_experiments/detector_summary.csv
+build/paper_platform/time_split_experiments/time_split_summary.json
+build/paper_platform/time_split_experiments/time_split_summary.md
+```
+
+该结果可以作为当前单条数据下的泛化 sanity check，但论文最终强结论仍应以多 route held-out 为准。
 
 LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编译结果在 `paper/build/main.pdf`。
 
@@ -164,6 +191,7 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 - 当前矩阵中 EA-SGLRT 已切换为非攻击数据预算校准的一致性门控工作点：在 6 alarms/min 预算下，mean false alarm 从 fixed fused 的约 17.8/min 降到约 5.94/min，precision 约 0.57，recall 约 0.35。论文应按 false-alarm-constrained Pareto/integrity trade-off 解读，而不是宣称绝对最高 F1。
 - 已包含固定阈值、固定 CUSUM、RAIM-only、robust RAIM、EKF innovation、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
 - 已补充 attack type/strength/ramp breakdown、clean/degraded false-alarm breakdown、参数敏感性和 paired bootstrap/sign-test。
+- 已新增单路线 temporal held-out 验证：当前默认按时间前 60% 做非攻击校准，后 40% 做测试；EA-SGLRT 在 held-out 段压到 6 alarms/min 预算内，但 recall 仍偏低，应作为低误报 trade-off 证据而非最终泛化结论。
 - 已新增 route-held-out 实验入口、配置化 route registry 和 ML tree-ensemble optional baseline。
 - 已新增 RTKLIB 完整时间轴检测/可视化目标；默认评估 CSV 仍按 FAST_GLIO 同步窗口统计，Rerun `.rrd` 用完整 RTK 轨迹展示攻击注入、观测级 bias、首次报警和 score/CUSUM/confidence，并区分攻击窗口内检测与攻击窗口外报警。
 - 下一步要把 degraded non-attack 从合成降质扩展为真实 urban/open-sky 分段，并用不同 route 做真正 held-out 结论。
@@ -178,7 +206,8 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 - 不同环境/质量：clean real、degraded non-attack。
 - 消融：去掉 raw GNSS、去掉 LIO consistency、去掉 adaptive gate、去掉 CUSUM。
 - 统计：paired bootstrap 95% CI、sign-test、攻击类型分解、参数敏感性。
-- Route split：支持 train-route 参数选择和 test-route 评估；`datasets/routes.yaml` 已提供可复现实验注册表；当前单 route 目标只能作为 smoke/demo，投稿结论需要多 route 输入。
+- Temporal split：支持单 route 前段校准、后段测试，用于当前 bag 没有第二条 route 时的阶段性验证。
+- Route split：支持 train-route 参数选择和 test-route 评估；`datasets/routes.yaml` 已提供可复现实验注册表；投稿强结论需要多 route 输入。
 - Optional ML baseline：浅树集成分类器可作为非方法主线的对比基线。
 
 投稿前仍建议补充：

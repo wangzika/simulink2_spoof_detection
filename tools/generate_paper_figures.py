@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--full-timeline-summary", default="build/paper_platform/full_data_attack_full_timeline/full_data_attack_full_timeline_detection_summary.json")
     parser.add_argument("--rtklib-pos", default="../full_data/gnss/rtklib_full.pos")
     parser.add_argument("--adaptive-dir", default="build/paper_platform/adaptive_experiments")
+    parser.add_argument("--time-split-dir", default="build/paper_platform/time_split_experiments")
     parser.add_argument("--output-dir", default="paper/figures")
     parser.add_argument("--metrics-tex", default="paper/generated_metrics.tex")
     return parser.parse_args()
@@ -90,6 +91,13 @@ def load_inputs(args: argparse.Namespace):
     attack_classification_summary = pd.read_csv(require(adaptive_dir / "attack_classification_summary.csv"))
     adaptive_timeline = pd.read_csv(require(adaptive_dir / "adaptive_timeline.csv"))
     experiment_summary = json.loads(require(adaptive_dir / "experiment_summary.json").read_text(encoding="utf-8"))
+    time_split_dir = resolve(args.time_split_dir)
+    if time_split_dir.exists() and (time_split_dir / "detector_summary.csv").exists():
+        time_split_summary = pd.read_csv(time_split_dir / "detector_summary.csv")
+        time_split_meta = load_optional_json(time_split_dir / "time_split_summary.json")
+    else:
+        time_split_summary = pd.DataFrame()
+        time_split_meta = {}
     return (
         attack,
         clean,
@@ -115,6 +123,8 @@ def load_inputs(args: argparse.Namespace):
         attack_classification_summary,
         adaptive_timeline,
         experiment_summary,
+        time_split_summary,
+        time_split_meta,
     )
 
 
@@ -1015,6 +1025,8 @@ def write_metrics_tex(
     sensitivity_summary: pd.DataFrame,
     attack_classification_summary: pd.DataFrame,
     experiment_summary: dict,
+    time_split_summary: pd.DataFrame,
+    time_split_meta: dict,
 ) -> None:
     best_f1 = attack_metrics.get("threshold_sweep", {}).get("best_f1", {})
     latency = attack_metrics.get("detection_latency_s", {})
@@ -1075,6 +1087,21 @@ def write_metrics_tex(
         except (TypeError, ValueError):
             return default
 
+    def time_split_value(detector_name: str, column: str, split: str = "heldout_test") -> float:
+        if time_split_summary.empty:
+            return 0.0
+        matches = time_split_summary[
+            (time_split_summary["split"] == split)
+            & (time_split_summary["detector"] == detector_name)
+        ]
+        if matches.empty:
+            return 0.0
+        value = matches.iloc[0].get(column, 0.0)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
     sensitivity_fa_limit = row_value(constrained_sensitivity, "operating_fa_limit", 0.0)
     if sensitivity_fa_limit <= 0.0 and not sensitivity_summary.empty and "operating_fa_limit" in sensitivity_summary:
         sensitivity_fa_limit = float(pd.to_numeric(sensitivity_summary["operating_fa_limit"], errors="coerce").fillna(0.0).max())
@@ -1116,6 +1143,10 @@ def write_metrics_tex(
     adaptive_fa_delta = dvalue("adaptive_seq_full", "mean_false_alarm_per_min") - dvalue("fixed_fused", "mean_false_alarm_per_min")
     adaptive_clean_fa_delta = dvalue("adaptive_seq_full", "clean_false_alarm_per_min") - dvalue("fixed_fused", "clean_false_alarm_per_min")
     adaptive_degraded_fa_delta = dvalue("adaptive_seq_full", "degraded_false_alarm_per_min") - dvalue("fixed_fused", "degraded_false_alarm_per_min")
+    time_split_meta_split = time_split_meta.get("split", {}) if isinstance(time_split_meta, dict) else {}
+    time_split_config = time_split_meta.get("selected_config", {}) if isinstance(time_split_meta, dict) else {}
+    time_split_operating_fa = float(time_split_meta.get("operating_fa_limit", 0.0)) if isinstance(time_split_meta, dict) else 0.0
+    time_split_calibration_fa = float(time_split_meta.get("calibration_fa_limit", 0.0)) if isinstance(time_split_meta, dict) else 0.0
 
     rows = [
         macro("RinexEpochCount", f"{int(rinex_summary['epochs'])}"),
@@ -1249,6 +1280,21 @@ def write_metrics_tex(
         macro("AdaptiveVsFixedCiLow", f"{float(paired_stats.get('ci95_low', 0.0)):.3f}"),
         macro("AdaptiveVsFixedCiHigh", f"{float(paired_stats.get('ci95_high', 0.0)):.3f}"),
         macro("AdaptiveVsFixedPvalue", f"{float(paired_stats.get('sign_test_p_value', 1.0)):.4f}"),
+        macro("TemporalHoldoutTrainRows", f"{int(float(time_split_meta_split.get('train_rows', 0)))}"),
+        macro("TemporalHoldoutTestRows", f"{int(float(time_split_meta_split.get('test_rows', 0)))}"),
+        macro("TemporalHoldoutSplitTime", f"{float(time_split_meta_split.get('split_time_s', 0.0)):.3f}"),
+        macro("TemporalHoldoutAdaptiveGain", f"{float(time_split_config.get('adaptive_gain', 0.0)):.2f}"),
+        macro("TemporalHoldoutCusum", f"{float(time_split_config.get('cusum_threshold', 0.0)):.2f}"),
+        macro("TemporalHoldoutCalibrationFaLimit", f"{time_split_calibration_fa:.3f}"),
+        macro("TemporalHoldoutFinalFaBudget", f"{time_split_operating_fa:.3f}"),
+        macro("TemporalHoldoutAdaptivePrecision", f"{time_split_value('adaptive_seq_full', 'attack_precision_mean'):.3f}"),
+        macro("TemporalHoldoutAdaptiveRecall", f"{time_split_value('adaptive_seq_full', 'attack_recall_mean'):.3f}"),
+        macro("TemporalHoldoutAdaptiveFone", f"{time_split_value('adaptive_seq_full', 'attack_f1_mean'):.3f}"),
+        macro("TemporalHoldoutAdaptivePmd", f"{time_split_value('adaptive_seq_full', 'missed_detection_rate'):.3f}"),
+        macro("TemporalHoldoutAdaptiveFalseAlarm", f"{time_split_value('adaptive_seq_full', 'false_alarm_per_min_mean'):.3f}"),
+        macro("TemporalHoldoutAdaptiveLatency", f"{time_split_value('adaptive_seq_full', 'latency_mean_s'):.3f}"),
+        macro("TemporalHoldoutFixedFone", f"{time_split_value('fixed_fused', 'attack_f1_mean'):.3f}"),
+        macro("TemporalHoldoutFixedFalseAlarm", f"{time_split_value('fixed_fused', 'false_alarm_per_min_mean'):.3f}"),
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(rows), encoding="utf-8")
@@ -1293,6 +1339,8 @@ def main() -> int:
         attack_classification_summary,
         adaptive_timeline,
         experiment_summary,
+        time_split_summary,
+        time_split_meta,
     ) = load_inputs(args)
     _ = clean
     _ = attack_strength_summary
@@ -1335,6 +1383,8 @@ def main() -> int:
         sensitivity_summary,
         attack_classification_summary,
         experiment_summary,
+        time_split_summary,
+        time_split_meta,
     )
     return 0
 

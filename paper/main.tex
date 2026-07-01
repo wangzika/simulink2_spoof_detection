@@ -253,6 +253,11 @@ Because a detector can trivially improve recall by alarming too often, we also r
 The reported EA-SGLRT operating point is selected from the sensitivity grid using only the clean/degraded false-alarm budget: among configurations satisfying \AdaptiveSeqFaBudget{} alarms/min, the most sensitive CUSUM/adaptive-gain pair is used for the attack evaluation.
 For statistical comparison, each synthetic attack scenario is treated as a paired trial between EA-SGLRT and the fixed fused detector.
 EA-SGLRT changes F1 by \AdaptiveVsFixedFoneGain{} on average relative to the fixed fused detector, with bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}] and sign-test $p=\AdaptiveVsFixedPvalue{}$.
+Because only one field collection is currently available, we also perform a temporal held-out validation instead of reusing the same samples for both calibration and reporting.
+The first \TemporalHoldoutTrainRows{} synchronized rows, up to original time \TemporalHoldoutSplitTime{} s, are used as the calibration segment; the remaining \TemporalHoldoutTestRows{} rows are reserved as an unseen later test segment.
+Within each segment, attack windows are re-zeroed to the segment start before synthetic spoofing is applied.
+The EA-SGLRT CUSUM threshold and adaptive gain are selected using only clean/degraded non-attack calibration data with a conservative \TemporalHoldoutCalibrationFaLimit{} alarms/min calibration target for a \TemporalHoldoutFinalFaBudget{} alarms/min held-out operating budget.
+This is weaker than independent route-held-out validation, but it prevents direct train/test reuse on the current single route.
 
 \begin{table}[!t]
 \centering
@@ -286,6 +291,27 @@ Detector & PMD & TTA (s) & FA/min \\
 LIO--GNSS & \LioResidualMissedDetectionRate{} & \LioResidualTimeToAlert{} & \LioResidualFalseAlarm{} \\
 Fixed fused & \FixedFusedMissedDetectionRate{} & \FixedFusedTimeToAlert{} & \FixedFusedMatrixFalseAlarm{} \\
 EA-SGLRT & \AdaptiveSeqMissedDetectionRate{} & \AdaptiveSeqTimeToAlert{} & \AdaptiveSeqFalseAlarm{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Temporal Held-Out Validation}
+Table~\ref{tab:temporal} reports the single-route temporal held-out result.
+The selected held-out configuration uses adaptive gain \TemporalHoldoutAdaptiveGain{} and CUSUM threshold \TemporalHoldoutCusum{}.
+On the later held-out segment, EA-SGLRT reaches precision \TemporalHoldoutAdaptivePrecision{}, recall \TemporalHoldoutAdaptiveRecall{}, F1 \TemporalHoldoutAdaptiveFone{}, PMD \TemporalHoldoutAdaptivePmd{}, and \TemporalHoldoutAdaptiveFalseAlarm{} false alarms/min.
+The fixed fused baseline has similar held-out F1 \TemporalHoldoutFixedFone{} but \TemporalHoldoutFixedFalseAlarm{} false alarms/min.
+Thus the same qualitative trade-off remains on unseen later samples: temporal generalization improves false-alarm control, but strict consistency gating still misses many weak or slow-ramp attacks.
+
+\begin{table}[!t]
+\centering
+\caption{Single-route temporal held-out validation. The first segment is used only for non-attack calibration; the later segment is used for reporting.}
+\label{tab:temporal}
+\begin{tabular}{lccccc}
+\toprule
+Detector & Prec. & Recall & F1 & PMD & FA/min \\
+\midrule
+Fixed fused & n/a & n/a & \TemporalHoldoutFixedFone{} & n/a & \TemporalHoldoutFixedFalseAlarm{} \\
+EA-SGLRT & \TemporalHoldoutAdaptivePrecision{} & \TemporalHoldoutAdaptiveRecall{} & \TemporalHoldoutAdaptiveFone{} & \TemporalHoldoutAdaptivePmd{} & \TemporalHoldoutAdaptiveFalseAlarm{} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -389,6 +415,7 @@ Spoofing, in contrast, is modeled as persistent cross-cue inconsistency: raw pse
 The present results also show what the method has not yet solved.
 The full-data operating point is non-dominated because it satisfies the non-attack false-alarm budget while trading lower false-alarm rate and higher precision for lower recall and F1 relative to fixed fusion; it is not a strict improvement on every axis.
 This is consistent with the parameter sweep, where several low-false-alarm points exist but none simultaneously reaches the high recall of the LiDAR--GNSS residual monitor.
+The temporal held-out experiment supports this interpretation on unseen later samples from the same collection: the detector stays below the configured false-alarm budget, but recall remains the bottleneck.
 The next version should therefore learn or calibrate the environment weights on separate clean/degraded routes, then evaluate on route-held-out spoofing scenarios.
 
 The attack-factor study also clarifies the remaining failure modes.
@@ -405,7 +432,8 @@ The current false-alarm rate is much lower than the original sequential fusion r
 The spoofing experiments are synthetic rather than collected from a live RF spoofing campaign.
 They are still useful because the injector modifies observation-level pseudoranges and post-fusion residuals in controlled ways while preserving the real trajectory, satellite geometry, C/N0, DOP, RTK status, and LiDAR--inertial logs.
 However, a journal submission should validate the final detector on additional open-sky, urban, and real or replayed spoofing datasets, and should report per-route confidence intervals rather than relying on a single synchronized rover sequence.
-The current parameter sweep is a first robustness check; future work should tune on one route and test on unseen routes to remove any remaining dataset-specific calibration.
+The current temporal held-out split is useful for the available single route, but it does not remove temporal correlation or site-specific calibration.
+The current parameter sweep is therefore a first robustness check; future work should tune on one route and test on unseen routes to remove any remaining dataset-specific calibration.
 
 \section{Conclusion}
 This paper converts the previous platform draft into a method-oriented detector: an environment-adaptive sequential GLRT that fuses raw GNSS and LiDAR--inertial consistency.

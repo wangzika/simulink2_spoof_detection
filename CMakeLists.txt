@@ -387,6 +387,19 @@ if (Python3_EXECUTABLE)
             COMMENT "Run route-split tuning/test evaluation with optional ML baseline"
             VERBATIM
         )
+        add_custom_target(time_split_experiments
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/time_split_experiments.py
+                --base-csv ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean/full_data_clean_detection.csv
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/time_split_experiments
+                --train-fraction 0.60
+                --operating-fa-limit 6.0
+                --calibration-fa-margin 0.55
+            DEPENDS paper_dataset
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Run temporal held-out calibration/test evaluation on one route"
+            VERBATIM
+        )
         add_custom_target(configured_route_experiments
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/run_configured_routes.py
@@ -402,7 +415,7 @@ if (Python3_EXECUTABLE)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_paper_figures.py
                 --output-dir ${CMAKE_CURRENT_SOURCE_DIR}/paper/figures
                 --metrics-tex ${CMAKE_CURRENT_SOURCE_DIR}/paper/generated_metrics.tex
-            DEPENDS paper_pipeline adaptive_experiments paper_dataset_attack_full_timeline
+            DEPENDS paper_pipeline adaptive_experiments time_split_experiments paper_dataset_attack_full_timeline
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Generate LaTeX paper figures from experiment outputs"
             VERBATIM
@@ -507,6 +520,11 @@ if (BUILD_TESTING)
         add_test(
             NAME route_split_smoke
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_route_split_experiments.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        add_test(
+            NAME time_split_smoke
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_time_split_experiments.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
         add_test(

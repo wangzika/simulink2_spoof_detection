@@ -1,6 +1,6 @@
 # C++ F7 Flight Simulation
 
-中文总览和操作手册见 [docs/project_architecture_and_usage.md](docs/project_architecture_and_usage.md)。该文档按当前项目状态整理了整体架构、数据流、C++ 仿真、ImGui/Rerun 可视化、真实数据适配、论文实验矩阵、route-split、LaTeX 论文生成和投稿前限制。
+中文总览和操作手册见 [docs/project_architecture_and_usage.md](docs/project_architecture_and_usage.md)。该文档按当前项目状态整理了整体架构、数据流、C++ 仿真、ImGui/Rerun 可视化、真实数据适配、论文实验矩阵、time-split/route-split、LaTeX 论文生成和投稿前限制。
 
 This is a standalone C++17 migration prototype for the MATLAB/Simulink GPS attack project. It rebuilds the main closed-loop structure in native C++:
 
@@ -189,9 +189,10 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 - `tools/run_experiment_matrix.py` generates clean, degraded non-attack, multi-strength, multi-ramp, multi-type spoofing experiments, baseline/ablation comparisons, attack-factor summaries, and parameter-sensitivity sweeps.
 - `tools/ml_baseline.py` implements a dependency-light RandomForest/XGBoost-style tree-ensemble classifier baseline.
 - `tools/route_split_experiments.py` runs train-route tuning, test-route evaluation, and optional ML-baseline comparisons across route CSVs.
+- `tools/time_split_experiments.py` runs single-route temporal held-out calibration/test experiments when only one field route is available.
 - `datasets/routes.yaml` and `tools/run_configured_routes.py` provide a reproducible multi-route experiment registry, so new routes can be added without editing command lines.
 - `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
-- `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, `tools/smoke_raw_residuals.py`, `tools/smoke_adaptive_detector.py`, `tools/smoke_route_split_experiments.py`, and `tools/smoke_configured_routes.py` are self-contained CTest smoke tests.
+- `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, `tools/smoke_raw_residuals.py`, `tools/smoke_adaptive_detector.py`, `tools/smoke_route_split_experiments.py`, `tools/smoke_time_split_experiments.py`, and `tools/smoke_configured_routes.py` are self-contained CTest smoke tests.
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
 - `docs/gnss_spoofing_literature.md` summarizes GNSS spoofing/jamming detection literature by method family for the Related Work section.
 - `docs/paper_draft.md` contains the initial paper draft skeleton.
@@ -202,7 +203,7 @@ Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO 
 cmake --build build --target paper_pipeline
 ```
 
-Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_dataset_attack_full_timeline`, `paper_adaptive_attack_full_timeline`, `paper_rerun_record`, `paper_rerun_view`, `paper_eval_clean`, `paper_eval_attack`, `adaptive_experiments`, `route_split_experiments`, and `configured_route_experiments`.
+Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_dataset_attack_full_timeline`, `paper_adaptive_attack_full_timeline`, `paper_rerun_record`, `paper_rerun_view`, `paper_eval_clean`, `paper_eval_attack`, `adaptive_experiments`, `time_split_experiments`, `route_split_experiments`, and `configured_route_experiments`.
 
 Generate the LaTeX figures and PDF draft:
 
@@ -347,7 +348,36 @@ build/paper_platform/route_split_experiments/detector_summary.csv
 build/paper_platform/route_split_experiments/route_split_summary.json
 ```
 
-When only one route is available, the CMake `route_split_experiments` target runs a same-route demonstration. For paper claims, use disjoint train/test route names.
+When only one route is available, prefer temporal held-out validation over a same-route route-split demonstration:
+
+```bash
+python tools/time_split_experiments.py \
+  --base-csv build/paper_platform/full_data_clean/full_data_clean_detection.csv \
+  --output-dir build/paper_platform/time_split_experiments \
+  --train-fraction 0.60 \
+  --operating-fa-limit 6.0
+```
+
+This writes:
+
+```text
+build/paper_platform/time_split_experiments/calibration_segment.csv
+build/paper_platform/time_split_experiments/heldout_test_segment.csv
+build/paper_platform/time_split_experiments/tuning_summary.csv
+build/paper_platform/time_split_experiments/train_results.csv
+build/paper_platform/time_split_experiments/test_results.csv
+build/paper_platform/time_split_experiments/detector_summary.csv
+build/paper_platform/time_split_experiments/time_split_summary.json
+build/paper_platform/time_split_experiments/time_split_summary.md
+```
+
+The CMake shortcut is:
+
+```bash
+cmake --build build --target time_split_experiments
+```
+
+Temporal held-out validation uses the first part of the route for non-attack calibration and the remaining part for reporting. For final paper claims, disjoint route names are still stronger than temporal splits.
 
 For repeatable paper experiments, add routes and train/test splits to `datasets/routes.yaml`, then run the configured wrapper:
 

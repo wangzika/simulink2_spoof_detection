@@ -46,7 +46,9 @@ flowchart LR
     D --> H["Detection CSV"]
     H --> I["adaptive_sequential_detector.py"]
     H --> J["run_experiment_matrix.py"]
+    H --> O["time_split_experiments.py"]
     J --> K["Baseline / ablation / Pareto / sensitivity results"]
+    O --> K
     K --> L["generate_paper_figures.py"]
     L --> M["paper/figures + generated_metrics.tex"]
     M --> N["paper/main.tex -> paper/build/main.pdf"]
@@ -546,7 +548,49 @@ route_split_summary.md
 - optional ML baseline 默认启用；
 - 只有单 route 时只能作为 smoke/demo，不适合写成最终投稿结论。
 
-### 7.3 配置化 route registry
+### 7.3 单 route 时间留出实验
+
+如果目前只有一条真实 route，可以把前半段用于阈值校准，把剩余数据作为 held-out test。这样仍然不如多 route 泛化强，但比在同一时间段上调参和报告更合理。
+
+```bash
+python tools/time_split_experiments.py \
+  --base-csv build/paper_platform/full_data_clean/full_data_clean_detection.csv \
+  --output-dir build/paper_platform/time_split_experiments \
+  --train-fraction 0.60 \
+  --operating-fa-limit 6.0
+```
+
+默认逻辑：
+
+- 按 `time_s` 排序；
+- 前 60% 时间跨度作为 `calibration`；
+- 后 40% 作为 `heldout_test`；
+- 每个 segment 内重新把 `time_s` 归零，因此 `--attack-window +20:+260` 表示相对当前 segment 的攻击窗口；
+- 只用 calibration 段 clean/degraded 非攻击数据选择 EA-SGLRT 参数；
+- heldout_test 段只用于最终 precision、recall、F1、PMD、FA/min 和 latency 报告。
+
+输出：
+
+```text
+calibration_segment.csv
+heldout_test_segment.csv
+tuning_summary.csv
+train_results.csv
+test_results.csv
+detector_summary.csv
+time_split_summary.json
+time_split_summary.md
+```
+
+CMake 快捷入口：
+
+```bash
+cmake --build build --target time_split_experiments
+```
+
+当前 full_data 默认结果显示：EA-SGLRT 在 held-out 段可以把误报压到 6 alarms/min 预算内，但 recall 仍偏低。论文中应把这个结果写成低误报与漏检率之间的 trade-off，而不是写成“已经完全可发表泛化”。
+
+### 7.4 配置化 route registry
 
 编辑：
 
@@ -600,6 +644,7 @@ cmake --build build --target paper_eval_clean
 cmake --build build --target paper_eval_attack
 cmake --build build --target paper_pipeline
 cmake --build build --target adaptive_experiments
+cmake --build build --target time_split_experiments
 cmake --build build --target route_split_experiments
 cmake --build build --target configured_route_experiments
 cmake --build build --target paper_figures
@@ -684,12 +729,13 @@ ctest --test-dir build --output-on-failure
 - raw residual smoke；
 - adaptive detector smoke；
 - route split smoke；
+- time split smoke；
 - configured routes smoke。
 
 建议每次修改核心算法或数据脚本后至少运行：
 
 ```bash
-PYTHONPYCACHEPREFIX=build/pycache python3 -m py_compile tools/run_experiment_matrix.py tools/generate_paper_figures.py
+PYTHONPYCACHEPREFIX=build/pycache python3 -m py_compile tools/run_experiment_matrix.py tools/time_split_experiments.py tools/generate_paper_figures.py
 ctest --test-dir build --output-on-failure
 cmake --build build --target paper_pdf
 ```
@@ -787,7 +833,7 @@ python tools/run_configured_routes.py \
 
 ## 12. 当前已知局限
 
-1. 当前强结论仍主要来自单条真实路线和合成攻击矩阵，多 route held-out 需要更多真实数据。
+1. 当前强结论仍主要来自单条真实路线和合成攻击矩阵；temporal held-out 已补上，但多 route held-out 仍需要更多真实数据。
 2. 真实 RF spoofing 或 replay spoofing 数据尚不足，synthetic observation-level attack 需要更多外部验证。
 3. BeiDou residual 框架已接入，但 BDS 专用修正仍需完善。
 4. Doppler/TDCP 框架已接入，但当前数据中 Doppler 可能缺失，无法充分体现该 cue。
