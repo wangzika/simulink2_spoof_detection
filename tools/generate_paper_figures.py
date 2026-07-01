@@ -13,7 +13,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(PROJECT_ROOT / "build" / "matplotlib_c
 os.environ.setdefault("XDG_CACHE_HOME", str(PROJECT_ROOT / "build" / "font_cache"))
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon, Rectangle
 import numpy as np
 import pandas as pd
 
@@ -158,36 +158,113 @@ def plot_architecture(output_dir: Path) -> None:
 
 
 def plot_method_flowchart(output_dir: Path) -> None:
-    fig, ax = plt.subplots(figsize=(10.6, 4.8))
+    fig, ax = plt.subplots(figsize=(8.9, 6.0))
     ax.axis("off")
-    boxes = {
-        "raw": (0.15, 3.35, "Raw GNSS\nRAIM + ref.\nresiduals", "#d8f3dc"),
-        "receiver": (0.15, 2.25, "Receiver\nPR RMS/max\nRTK quality", "#fff3bf"),
-        "lio": (0.15, 1.15, "LiDAR--inertial\nGNSS residual\n+ Mahalanobis", "#ffe3e3"),
-        "env": (0.15, 0.05, "Environment\nC/N0, DOP,\nsat count", "#e7f5ff"),
-        "normalize": (2.35, 2.15, "Cue normalization\nS_L, S_P, S_R,\nS_D, S_Q", "#edf2ff"),
-        "quality": (2.35, 0.35, "Environment index\nE_t and raw\ncoverage gate", "#e7f5ff"),
-        "fuse": (4.55, 2.15, "Support-gated\nfused evidence\nq_t G_t", "#f3d9fa"),
-        "threshold": (4.55, 0.35, "Adaptive threshold\nτ_t = τ_0(1 + αE_t\n+ βI_raw missing)", "#f1f3f5"),
-        "ratio": (6.65, 1.25, "Likelihood-ratio\nsurrogate\nΛ_t = q_tG_t / τ_t", "#e5dbff"),
-        "cusum": (8.45, 1.25, "Sequential GLRT\nCUSUM update\nC_t", "#dee2ff"),
-        "decision": (8.45, 0.05, "Decision outputs\ndetection, confidence,\nanomaly type", "#d0ebff"),
-    }
-    for key, (x, y, text, color) in boxes.items():
-        draw_box(ax, (x, y), text, width=1.75, height=0.78, color=color, fontsize=7.7)
-    draw_arrow(ax, (1.9, 3.74), (2.35, 2.74))
-    draw_arrow(ax, (1.9, 2.64), (2.35, 2.54))
-    draw_arrow(ax, (1.9, 1.54), (2.35, 2.36))
-    draw_arrow(ax, (1.9, 0.44), (2.35, 0.74))
-    draw_arrow(ax, (4.1, 2.54), (4.55, 2.54))
-    draw_arrow(ax, (4.1, 0.74), (4.55, 0.74))
-    draw_arrow(ax, (6.3, 2.54), (6.65, 1.85))
-    draw_arrow(ax, (6.3, 0.74), (6.65, 1.43))
-    draw_arrow(ax, (8.4, 1.64), (8.45, 1.64))
-    draw_arrow(ax, (9.32, 1.25), (9.32, 0.83))
-    ax.text(9.46, 1.02, "C_t > h", fontsize=7.4, color="#2d4059")
-    ax.set_xlim(0, 10.4)
-    ax.set_ylim(-0.15, 4.45)
+    ax.set_xlim(0, 10.0)
+    ax.set_ylim(0, 6.2)
+
+    def rect(x, y, w, h, text, edge="#94bfff", face="#ffffff", lw=1.6, ls="-", fs=8.3, weight="normal"):
+        patch = FancyBboxPatch(
+            (x, y),
+            w,
+            h,
+            boxstyle="round,pad=0.035,rounding_size=0.10",
+            linewidth=lw,
+            edgecolor=edge,
+            facecolor=face,
+            linestyle=ls,
+        )
+        ax.add_patch(patch)
+        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=fs, fontweight=weight)
+
+    def sharp_rect(x, y, w, h, text, edge="#b6b6ff", face="#ffffff", lw=1.6, ls="-", fs=8.2, weight="normal"):
+        patch = Rectangle((x, y), w, h, linewidth=lw, edgecolor=edge, facecolor=face, linestyle=ls)
+        ax.add_patch(patch)
+        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=fs, fontweight=weight)
+
+    def diamond(cx, cy, w, h, text):
+        patch = Polygon(
+            [(cx, cy + h / 2), (cx + w / 2, cy), (cx, cy - h / 2), (cx - w / 2, cy)],
+            closed=True,
+            linewidth=1.6,
+            edgecolor="#94bfff",
+            facecolor="#ffffff",
+        )
+        ax.add_patch(patch)
+        ax.text(cx, cy, text, ha="center", va="center", fontsize=6.9)
+
+    def arrow(start, end, color="#111111", lw=1.4, ls="-", mutation=11):
+        ax.add_patch(
+            FancyArrowPatch(
+                start,
+                end,
+                arrowstyle="-|>",
+                mutation_scale=mutation,
+                linewidth=lw,
+                linestyle=ls,
+                color=color,
+                shrinkA=0,
+                shrinkB=0,
+            )
+        )
+
+    # Sensor layer and spoofing injection.
+    sharp_rect(1.55, 5.55, 1.30, 0.55, "Spoofing\nsignals", edge="#ff0000", face="#fff5f5", lw=1.5, ls="--", fs=7.8, weight="bold")
+    sharp_rect(4.05, 5.58, 0.85, 0.42, "GNSS", fs=7.7)
+    sharp_rect(5.30, 5.58, 0.85, 0.42, "LiDAR", fs=7.7)
+    sharp_rect(6.55, 5.58, 0.85, 0.42, "INS", fs=7.7)
+    arrow((2.85, 5.82), (4.05, 5.80), color="#ff0000", lw=1.3, ls=":", mutation=10)
+    rect(3.05, 4.75, 4.65, 0.62, "Loosely-coupled Kalman filter", edge="#94bfff", face="#ffffff", fs=9.0)
+    arrow((4.48, 5.58), (4.48, 5.37), lw=1.2)
+    arrow((5.72, 5.58), (5.72, 5.37), lw=1.2)
+    arrow((6.98, 5.58), (6.98, 5.37), lw=1.2)
+
+    # Outer anti-spoofing model frame.
+    outer = Rectangle((0.45, 0.30), 9.10, 4.45, linewidth=1.25, edgecolor="#ff00ff", facecolor="none", linestyle=(0, (5, 3)))
+    ax.add_patch(outer)
+    ax.text(5.00, 4.45, "EA-SGLRT anti-spoofing model design", ha="center", va="center", fontsize=10.5, fontweight="bold")
+
+    # Measurement residual monitoring layer.
+    rect(0.95, 2.85, 8.10, 1.35, "", edge="#dff0d5", face="#dff0d5", lw=0.0)
+    ax.text(3.0, 2.98, "Measurement residual monitoring", ha="center", va="center", fontsize=8.6, fontweight="bold")
+    ax.text(0.98, 3.42, "$R_{GNSS}$\n$P_{k|k-1}$", ha="left", va="center", fontsize=7.4, fontweight="bold")
+    arrow((1.45, 3.42), (1.85, 3.42), lw=1.25)
+    rect(1.85, 3.10, 1.42, 0.65, "Trace\noperation", edge="#94d2ff", face="#f8fff4", fs=8.0)
+    arrow((3.27, 3.42), (4.02, 3.42), lw=1.25)
+    ax.text(3.48, 3.68, "$S_R,S_P$", fontsize=7.2)
+    diamond(4.50, 3.42, 1.10, 0.78, "Innovation\nmismatch?")
+    ax.text(4.13, 3.78, "No", fontsize=7.2, fontweight="bold")
+    arrow((5.05, 3.42), (5.62, 3.42), lw=1.25)
+    ax.text(5.12, 3.62, "Yes", fontsize=7.2, fontweight="bold")
+    rect(5.62, 3.10, 2.35, 0.68, "Decrease GNSS's\ncredibility", edge="#ff0000", face="#ffffff", fs=8.0)
+    ax.text(8.12, 3.95, "$\\tilde{R}_{GNSS}$", fontsize=7.5, fontweight="bold")
+    arrow((7.97, 3.42), (8.85, 3.42), lw=1.25)
+    arrow((8.85, 3.42), (8.85, 4.93), lw=1.25)
+    arrow((8.85, 4.93), (7.70, 4.93), lw=1.25)
+
+    # Sequential confirmation layer.
+    rect(0.95, 0.75, 8.10, 1.45, "", edge="#fff2c7", face="#fff2c7", lw=0.0)
+    ax.text(3.15, 0.98, "Environment-adaptive sequential confirmation", ha="center", va="center", fontsize=8.5, fontweight="bold")
+    ax.text(0.98, 1.45, "$E_t, q_t$\n$C_{k-1}$", ha="left", va="center", fontsize=7.4, fontweight="bold")
+    arrow((1.45, 1.45), (1.72, 1.45), lw=1.25)
+    rect(1.72, 1.18, 1.22, 0.60, "Environment\nindex", edge="#94d2ff", face="#fffaf0", fs=7.6)
+    arrow((2.94, 1.45), (3.52, 1.45), lw=1.25)
+    rect(3.52, 1.18, 1.70, 0.60, "Adaptive\nthreshold", edge="#94d2ff", face="#fffaf0", fs=7.6)
+    arrow((5.22, 1.45), (5.88, 1.45), lw=1.25)
+    rect(5.88, 1.18, 1.60, 0.60, "CUSUM\naccumulation", edge="#94d2ff", face="#fffaf0", fs=7.6)
+    arrow((7.48, 1.45), (7.90, 1.45), lw=1.25)
+    rect(7.90, 1.08, 1.02, 0.78, "Increase\nalarm\ncredibility", edge="#ff0000", face="#ffffff", fs=7.1)
+    arrow((4.50, 3.03), (4.50, 2.20), color="#0074d9", lw=1.5, mutation=12)
+    arrow((4.50, 2.20), (6.68, 2.20), color="#0074d9", lw=1.5, mutation=12)
+    arrow((6.68, 2.20), (6.68, 1.78), color="#0074d9", lw=1.5, mutation=12)
+
+    # Feedback to fusion filter and protected update path.
+    arrow((8.92, 1.45), (9.35, 1.45), lw=1.25)
+    arrow((9.35, 1.45), (9.35, 5.12), lw=1.25)
+    arrow((9.35, 5.12), (7.70, 5.12), lw=1.25)
+    arrow((0.45, 4.00), (3.05, 4.98), lw=1.35)
+    ax.text(7.98, 1.95, "$\\tilde{P}_{k|k-1}$", fontsize=7.2, fontweight="bold")
+    ax.text(5.40, 1.70, "$\\Lambda_t$", fontsize=7.2, fontweight="bold")
     savefig(output_dir / "method_flowchart.png")
 
 
