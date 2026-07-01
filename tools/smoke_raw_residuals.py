@@ -64,36 +64,46 @@ def write_pos(path: Path, stamp: float, receiver: raw.ReceiverPosition) -> None:
     )
 
 
-def generate_feature_rows(nav_path: Path, stamp: float, receiver: raw.ReceiverPosition) -> list[dict[str, object]]:
+def generate_feature_rows(nav_path: Path, stamps: list[float], receiver: raw.ReceiverPosition) -> list[dict[str, object]]:
     ephemerides = raw.parse_navigation_file(nav_path)
-    week, tow = raw.unix_to_gps_week_tow(stamp, 18.0)
     rows = []
     receiver_clock_bias_m = 72_000.0
-    for prn in range(1, 7):
-        sat_id = f"G{prn:02d}"
-        eph = raw.select_ephemeris(ephemerides, sat_id, week, tow)
-        assert eph is not None
-        pseudorange_m = 22_000_000.0
-        for _ in range(3):
-            transmit_tow = tow - pseudorange_m / raw.SPEED_OF_LIGHT_MPS
-            sx, sy, sz, sat_clock = raw.satellite_position_clock(eph, week, transmit_tow)
-            sx, sy, sz = raw.rotate_satellite_for_earth_rotation(sx, sy, sz, pseudorange_m / raw.SPEED_OF_LIGHT_MPS)
-            geom = raw.norm3(sx - receiver.x_m, sy - receiver.y_m, sz - receiver.z_m)
-            pseudorange_m = geom - raw.SPEED_OF_LIGHT_MPS * sat_clock + receiver_clock_bias_m
-        rows.append(
-            {
-                "stamp": f"{stamp:.9f}",
-                "time_s": "0.000000000",
-                "epoch_index": 0,
-                "sat_id": sat_id,
-                "system": "G",
-                "primary_code_type": "C1C",
-                "primary_code_m": f"{pseudorange_m:.9f}",
-                "primary_cn0_dbhz": "48.0",
-                "mean_cn0_dbhz": "48.0",
-                "lli_count": 0,
-            }
-        )
+    previous_reference_range: dict[str, tuple[float, float]] = {}
+    for epoch_index, stamp in enumerate(stamps):
+        week, tow = raw.unix_to_gps_week_tow(stamp, 18.0)
+        for prn in range(1, 7):
+            sat_id = f"G{prn:02d}"
+            eph = raw.select_ephemeris(ephemerides, sat_id, week, tow)
+            assert eph is not None
+            pseudorange_m = 22_000_000.0
+            for _ in range(3):
+                transmit_tow = tow - pseudorange_m / raw.SPEED_OF_LIGHT_MPS
+                sx, sy, sz, sat_clock = raw.satellite_position_clock(eph, week, transmit_tow)
+                sx, sy, sz = raw.rotate_satellite_for_earth_rotation(sx, sy, sz, pseudorange_m / raw.SPEED_OF_LIGHT_MPS)
+                geom = raw.norm3(sx - receiver.x_m, sy - receiver.y_m, sz - receiver.z_m)
+                pseudorange_m = geom - raw.SPEED_OF_LIGHT_MPS * sat_clock + receiver_clock_bias_m
+            doppler_rate = ""
+            previous = previous_reference_range.get(sat_id)
+            if previous is not None:
+                prev_stamp, prev_geom = previous
+                doppler_rate = f"{(geom - prev_geom) / (stamp - prev_stamp):.9f}"
+            previous_reference_range[sat_id] = (stamp, geom)
+            rows.append(
+                {
+                    "stamp": f"{stamp:.9f}",
+                    "time_s": f"{stamp - stamps[0]:.9f}",
+                    "epoch_index": epoch_index,
+                    "sat_id": sat_id,
+                    "system": "G",
+                    "primary_code_type": "C1C",
+                    "primary_code_m": f"{pseudorange_m:.9f}",
+                    "primary_carrier_phase_m": f"{geom + prn * 1000.0:.9f}",
+                    "doppler_range_rate_mps": doppler_rate,
+                    "primary_cn0_dbhz": "48.0",
+                    "mean_cn0_dbhz": "48.0",
+                    "lli_count": 0,
+                }
+            )
     return rows
 
 
@@ -110,12 +120,12 @@ def run_command(args: list[str]) -> None:
     subprocess.run(args, cwd=PROJECT_ROOT, check=True)
 
 
-def read_epoch(path: Path) -> dict[str, str]:
+def read_epochs(path: Path) -> list[dict[str, str]]:
     with path.open(newline="") as handle:
         rows = list(csv.DictReader(handle))
-    if len(rows) != 1:
-        raise SystemExit(f"Expected one residual epoch in {path}, got {len(rows)}")
-    return rows[0]
+    if not rows:
+        raise SystemExit(f"Expected residual epochs in {path}")
+    return rows
 
 
 def main() -> int:
@@ -131,7 +141,7 @@ def main() -> int:
     stamp = raw.gps_week_tow_to_unix(2299, 111600.0, 18.0)
     write_nav(nav_path)
     write_pos(pos_path, stamp, receiver)
-    write_features(features_path, generate_feature_rows(nav_path, stamp, receiver))
+    write_features(features_path, generate_feature_rows(nav_path, [stamp, stamp + 1.0], receiver))
 
     run_command(
         [
@@ -153,9 +163,12 @@ def main() -> int:
             "1.0",
         ]
     )
-    clean_epoch = read_epoch(clean_dir / "smoke_clean_raw_epoch_residuals.csv")
+    clean_epochs = read_epochs(clean_dir / "smoke_clean_raw_epoch_residuals.csv")
+    clean_epoch = clean_epochs[-1]
     if float(clean_epoch["raim_score"]) > 0.10:
         raise SystemExit(f"Expected low clean RAIM score, got {clean_epoch}")
+    if not any(float(row["doppler_used_count"]) > 0 and float(row["tdcp_valid_count"]) > 0 for row in clean_epochs):
+        raise SystemExit(f"Expected Doppler/TDCP residual counts in clean output, got {clean_epochs}")
 
     run_command(
         [
@@ -200,7 +213,7 @@ def main() -> int:
             "1.0",
         ]
     )
-    attack_epoch = read_epoch(attack_dir / "smoke_attack_raw_epoch_residuals.csv")
+    attack_epoch = read_epochs(attack_dir / "smoke_attack_raw_epoch_residuals.csv")[-1]
     attack_summary = json.loads((attacked_features_dir / "smoke_attack_attack_summary.json").read_text(encoding="utf-8"))
     if attack_summary["attacked_rows"] <= 0:
         raise SystemExit("Expected attacked rows in observation injector output")

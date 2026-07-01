@@ -254,6 +254,25 @@ if (Python3_EXECUTABLE)
             COMMENT "Run adaptive sequential GLRT experiment matrix and baseline ablations"
             VERBATIM
         )
+        add_custom_target(route_split_experiments
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/route_split_experiments.py
+                --route full_data=${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean/full_data_clean_detection.csv
+                --train-routes full_data
+                --test-routes full_data
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/route_split_experiments
+                --strengths-m 2,10
+                --ramps-s 1,20
+                --attack-types position_bias,coordinated_spoof
+                --adaptive-gains 1.35,2.0
+                --cusum-thresholds 0.5,0.75
+                --ml-max-train-rows 6000
+                --ml-trees 16
+            DEPENDS paper_dataset
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Run route-split tuning/test evaluation with optional ML baseline"
+            VERBATIM
+        )
         add_custom_target(paper_figures
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_paper_figures.py
@@ -359,6 +378,11 @@ if (BUILD_TESTING)
         add_test(
             NAME adaptive_detector_smoke
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_adaptive_detector.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        add_test(
+            NAME route_split_smoke
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_route_split_experiments.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

@@ -181,12 +181,14 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 
 - `tools/build_detection_dataset.py` merges RTKLIB `.pos`/DOP data with FAST_GLIO loose/raw/tight GNSS logs.
 - `tools/extract_rinex_features.py` extracts RINEX per-satellite raw observation features and per-epoch summaries.
-- `tools/compute_raw_gnss_residuals.py` parses GPS broadcast ephemerides, computes raw pseudorange residuals, and writes RAIM/reference residual summaries.
+- `tools/compute_raw_gnss_residuals.py` parses GPS broadcast ephemerides, computes raw pseudorange residuals, writes RAIM/reference residual summaries, and now emits Doppler/TDCP residual statistics with a multi-constellation observation framework.
 - `tools/inject_observation_attack.py` injects reproducible observation-level pseudorange attacks into per-satellite RINEX feature CSVs.
 - `tools/adaptive_sequential_detector.py` implements the Environment-Adaptive Sequential GLRT detector and the baseline/ablation detectors.
 - `tools/run_experiment_matrix.py` generates clean, degraded non-attack, multi-strength, multi-ramp, multi-type spoofing experiments, baseline/ablation comparisons, attack-factor summaries, and parameter-sensitivity sweeps.
+- `tools/ml_baseline.py` implements a dependency-light RandomForest/XGBoost-style tree-ensemble classifier baseline.
+- `tools/route_split_experiments.py` runs train-route tuning, test-route evaluation, and optional ML-baseline comparisons across route CSVs.
 - `tools/evaluate_detection.py` reports precision, recall, F1, ROC AUC, false alarms per minute, and detection latency.
-- `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, `tools/smoke_raw_residuals.py`, and `tools/smoke_adaptive_detector.py` are self-contained CTest smoke tests.
+- `tools/smoke_paper_pipeline.py`, `tools/smoke_rinex_features.py`, `tools/smoke_raw_residuals.py`, `tools/smoke_adaptive_detector.py`, and `tools/smoke_route_split_experiments.py` are self-contained CTest smoke tests.
 - `docs/paper_platform.md` describes the staged platform roadmap and verification commands.
 - `docs/gnss_spoofing_literature.md` summarizes GNSS spoofing/jamming detection literature by method family for the Related Work section.
 - `docs/paper_draft.md` contains the initial paper draft skeleton.
@@ -197,7 +199,7 @@ Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO 
 cmake --build build --target paper_pipeline
 ```
 
-Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, `paper_eval_attack`, and `adaptive_experiments`.
+Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, `paper_eval_attack`, `adaptive_experiments`, and `route_split_experiments`.
 
 Generate the LaTeX figures and PDF draft:
 
@@ -304,6 +306,29 @@ build/paper_platform/adaptive_experiments/sensitivity_summary.csv
 build/paper_platform/adaptive_experiments/attack_classification_summary.csv
 build/paper_platform/adaptive_experiments/adaptive_timeline.csv
 ```
+
+Run route-held-out style experiments across multiple detection CSVs:
+
+```bash
+python tools/route_split_experiments.py \
+  --route route_a=build/paper_platform/full_data_clean/full_data_clean_detection.csv \
+  --route route_b=/path/to/another_route_detection.csv \
+  --train-routes route_a \
+  --test-routes route_b \
+  --output-dir build/paper_platform/route_split_experiments
+```
+
+This writes:
+
+```text
+build/paper_platform/route_split_experiments/tuning_summary.csv
+build/paper_platform/route_split_experiments/train_results.csv
+build/paper_platform/route_split_experiments/test_results.csv
+build/paper_platform/route_split_experiments/detector_summary.csv
+build/paper_platform/route_split_experiments/route_split_summary.json
+```
+
+When only one route is available, the CMake `route_split_experiments` target runs a same-route demonstration. For paper claims, use disjoint train/test route names.
 
 ## ImGui Desktop UI
 

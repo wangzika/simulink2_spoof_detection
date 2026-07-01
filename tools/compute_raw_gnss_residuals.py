@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Compute raw GPS pseudorange residuals and a transparent RAIM baseline.
+"""Compute raw GNSS pseudorange residuals and a transparent RAIM baseline.
 
-This tool intentionally keeps the first implementation GPS-only. It parses
-RINEX broadcast ephemerides, decodes GPS C-code pseudorange observations from
-RINEX observation files or a precomputed satellite-feature CSV, solves a
-weighted least-squares GNSS-only position/clock estimate, and reports both
-post-fit RAIM residuals and reference-position residuals against RTK/known ECEF.
+The broadcast-orbit implementation currently supports GPS ephemerides, while
+the observation pipeline is multi-constellation aware and records unsupported
+systems for later Galileo/BDS extension. It decodes pseudorange, Doppler, and
+carrier observations from RINEX observation files or a precomputed
+satellite-feature CSV, solves a weighted least-squares GNSS-only position/clock
+estimate, and reports post-fit RAIM, reference-position residuals, Doppler
+range-rate residuals, and TDCP residuals against RTK/known ECEF.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import re
 from statistics import NormalDist
 from typing import Iterable
 
-from extract_rinex_features import iter_epochs, values_by_prefix
+from extract_rinex_features import iter_epochs, values_by_prefix, wavelength_m
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +90,8 @@ class Observation:
     attack_scale: float = 0.0
     injected_pseudorange_bias_m: float = 0.0
     clean_pseudorange_m: float | None = None
+    doppler_range_rate_mps: float | None = None
+    carrier_phase_m: float | None = None
 
 
 @dataclass
@@ -105,6 +109,8 @@ class PreparedObservation:
     weight: float
     direct_attack_bias_m: float
     attack_scale: float
+    doppler_range_rate_mps: float | None
+    carrier_phase_m: float | None
 
 
 @dataclass
@@ -125,7 +131,7 @@ class AttackWindow:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compute GPS broadcast-ephemeris raw pseudorange residuals and RAIM statistics.")
+    parser = argparse.ArgumentParser(description="Compute broadcast-ephemeris raw pseudorange residuals and RAIM statistics.")
     parser.add_argument("--obs", help="RINEX observation file. Used when --satellite-features is not provided.")
     parser.add_argument("--satellite-features", help="CSV from extract_rinex_features.py or inject_observation_attack.py.")
     parser.add_argument("--nav", required=True, help="RINEX broadcast navigation file.")
@@ -133,7 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--receiver-ecef", default="", help="Fallback receiver ECEF x,y,z in meters.")
     parser.add_argument("--name", default="raw_gnss", help="Output file prefix.")
     parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "build" / "paper_platform" / "raw_gnss"))
-    parser.add_argument("--systems", default="G", help="Comma-separated systems. First implementation supports GPS/G.")
+    parser.add_argument("--systems", default="G", help="Comma-separated systems to read, e.g. G,E,C. Broadcast residuals currently support GPS/G.")
     parser.add_argument("--gps-utc-leap-seconds", type=float, default=18.0)
     parser.add_argument("--max-delta-s", type=float, default=1.5, help="Reference-position sync tolerance.")
     parser.add_argument("--elevation-mask-deg", type=float, default=10.0)
@@ -521,6 +527,36 @@ def preferred_code(values) -> tuple[str, float] | None:
     return first.obs_type, float(first.value)
 
 
+def preferred_carrier_phase_m(system: str, values) -> float | None:
+    carrier_values = [item for item in values_by_prefix(values, "L") if item.value is not None]
+    if not carrier_values:
+        return None
+    priority = ["L1C", "L1W", "L1X", "L1P", "L2W", "L2X", "L5X"]
+    by_type = {item.obs_type: item.value for item in carrier_values if item.value is not None}
+    ordered = [obs_type for obs_type in priority if obs_type in by_type]
+    if not ordered:
+        ordered = [carrier_values[0].obs_type]
+    wav = wavelength_m(system, ordered[0])
+    if wav is None:
+        return None
+    return float(by_type[ordered[0]]) * wav
+
+
+def preferred_doppler_range_rate_mps(system: str, values) -> float | None:
+    doppler_values = [item for item in values_by_prefix(values, "D") if item.value is not None]
+    if not doppler_values:
+        return None
+    priority = ["D1C", "D1W", "D1X", "D1P", "D2W", "D2X", "D5X"]
+    by_type = {item.obs_type: item.value for item in doppler_values if item.value is not None}
+    ordered = [obs_type for obs_type in priority if obs_type in by_type]
+    if not ordered:
+        ordered = [doppler_values[0].obs_type]
+    wav = wavelength_m(system, ordered[0])
+    if wav is None:
+        return None
+    return -float(by_type[ordered[0]]) * wav
+
+
 def primary_cn0(values) -> float | None:
     cn0_values = [item.value for item in values_by_prefix(values, "S") if item.value is not None]
     if not cn0_values:
@@ -549,6 +585,8 @@ def load_observations_from_rinex(path: Path, leap_seconds: float, systems: set[s
                     pseudorange_m=pseudorange_m,
                     cn0_dbhz=primary_cn0(sat.values),
                     lli_count=sum(1 for item in sat.values if item.lli is not None and item.lli != 0),
+                    doppler_range_rate_mps=preferred_doppler_range_rate_mps(sat.sat_id[0], sat.values),
+                    carrier_phase_m=preferred_carrier_phase_m(sat.sat_id[0], sat.values),
                 )
             )
     return observations
@@ -583,6 +621,8 @@ def load_observations_from_satellite_features(path: Path, systems: set[str], max
                     attack_scale=parse_float(row.get("attack_scale")) or 0.0,
                     injected_pseudorange_bias_m=parse_float(row.get("injected_pseudorange_bias_m")) or 0.0,
                     clean_pseudorange_m=parse_float(row.get("clean_primary_code_m")),
+                    doppler_range_rate_mps=parse_float(row.get("doppler_range_rate_mps")),
+                    carrier_phase_m=parse_float(row.get("primary_carrier_phase_m")),
                 )
             )
     return observations
@@ -710,6 +750,8 @@ def prepare_observation(
         weight=1.0 / max(1e-9, sigma_m * sigma_m),
         direct_attack_bias_m=direct_bias_m,
         attack_scale=max(obs.attack_scale, direct_scale),
+        doppler_range_rate_mps=obs.doppler_range_rate_mps,
+        carrier_phase_m=obs.carrier_phase_m,
     )
 
 
@@ -849,6 +891,22 @@ def residual_stats(residuals: list[float], sigmas: list[float], dof: int, pfa: f
     }
 
 
+def rate_stats(residuals: list[float]) -> dict[str, float | int]:
+    if not residuals:
+        return {
+            "count": 0,
+            "rms": 0.0,
+            "abs_mean": 0.0,
+            "max_abs": 0.0,
+        }
+    return {
+        "count": len(residuals),
+        "rms": rms(residuals),
+        "abs_mean": sum(abs(value) for value in residuals) / len(residuals),
+        "max_abs": max(abs(value) for value in residuals),
+    }
+
+
 def group_by_epoch(observations: list[Observation]) -> dict[tuple[float, int], list[Observation]]:
     grouped: dict[tuple[float, int], list[Observation]] = {}
     for obs in observations:
@@ -874,9 +932,15 @@ def process_epochs(
     epoch_rows: list[dict[str, object]] = []
     skipped_epochs = 0
     no_reference_epochs = 0
+    supported_systems = {"G"}
+    unsupported_system_counts: dict[str, int] = {}
+    previous_satellite_state: dict[str, dict[str, float]] = {}
 
     for (stamp, epoch_index) in sorted(grouped):
         epoch_observations = grouped[(stamp, epoch_index)]
+        for obs in epoch_observations:
+            if obs.sat_id[:1] not in supported_systems:
+                unsupported_system_counts[obs.sat_id[:1]] = unsupported_system_counts.get(obs.sat_id[:1], 0) + 1
         reference = nearest_position(positions, stamp, args.max_delta_s, fallback_position)
         if reference is None:
             no_reference_epochs += 1
@@ -931,6 +995,40 @@ def process_epochs(
             wls_de, wls_dn, wls_du = ecef_to_enu_vector(wls.x_m - reference.x_m, wls.y_m - reference.y_m, wls.z_m - reference.z_m, lat, lon)
             wls_norm = norm3(wls_de, wls_dn, wls_du)
 
+        doppler_residuals: list[float] = []
+        tdcp_residuals: list[float] = []
+        rate_by_sat: dict[str, dict[str, float]] = {}
+        for item in prepared:
+            previous = previous_satellite_state.get(item.obs.sat_id)
+            predicted_range_rate_mps = None
+            tdcp_range_rate_mps = None
+            doppler_residual_mps = None
+            tdcp_residual_mps = None
+            if previous is not None:
+                dt = stamp - previous["stamp"]
+                if dt > 1e-6:
+                    predicted_range_rate_mps = (item.reference_range_m - previous["reference_range_m"]) / dt
+                    if item.doppler_range_rate_mps is not None:
+                        doppler_residual_mps = item.doppler_range_rate_mps - predicted_range_rate_mps
+                        doppler_residuals.append(doppler_residual_mps)
+                    if item.carrier_phase_m is not None and "carrier_phase_m" in previous:
+                        tdcp_range_rate_mps = (item.carrier_phase_m - previous["carrier_phase_m"]) / dt
+                        tdcp_residual_mps = tdcp_range_rate_mps - predicted_range_rate_mps
+                        tdcp_residuals.append(tdcp_residual_mps)
+            state = {"stamp": stamp, "reference_range_m": item.reference_range_m}
+            if item.carrier_phase_m is not None:
+                state["carrier_phase_m"] = item.carrier_phase_m
+            previous_satellite_state[item.obs.sat_id] = state
+            rate_by_sat[item.obs.sat_id] = {
+                "predicted_range_rate_mps": predicted_range_rate_mps,
+                "doppler_range_rate_mps": item.doppler_range_rate_mps,
+                "doppler_residual_mps": doppler_residual_mps,
+                "tdcp_range_rate_mps": tdcp_range_rate_mps,
+                "tdcp_residual_mps": tdcp_residual_mps,
+            }
+        doppler_stats = rate_stats(doppler_residuals)
+        tdcp_stats = rate_stats(tdcp_residuals)
+
         attack_label = 1 if any(item.obs.attack_label or item.attack_scale > 1e-9 for item in prepared) else 0
         attacked_count = sum(
             1
@@ -938,8 +1036,10 @@ def process_epochs(
             if item.obs.attack_label or abs(item.obs.injected_pseudorange_bias_m + item.direct_attack_bias_m) > 1e-9
         )
         row_by_sat = {item.obs.sat_id: idx for idx, item in enumerate(prepared)}
+        used_systems = sorted({item.obs.sat_id[:1] for item in prepared})
         for item in prepared:
             sat_index = row_by_sat[item.obs.sat_id]
+            rate_row = rate_by_sat.get(item.obs.sat_id, {})
             satellite_rows.append(
                 {
                     "stamp": stamp,
@@ -965,6 +1065,12 @@ def process_epochs(
                     "cn0_dbhz": item.obs.cn0_dbhz,
                     "sigma_m": item.sigma_m,
                     "weight": item.weight,
+                    "doppler_range_rate_mps": rate_row.get("doppler_range_rate_mps"),
+                    "predicted_range_rate_mps": rate_row.get("predicted_range_rate_mps"),
+                    "doppler_residual_mps": rate_row.get("doppler_residual_mps"),
+                    "carrier_phase_m": item.carrier_phase_m,
+                    "tdcp_range_rate_mps": rate_row.get("tdcp_range_rate_mps"),
+                    "tdcp_residual_mps": rate_row.get("tdcp_residual_mps"),
                     "reference_clock_bias_m": reference_clock_bias_m,
                     "reference_residual_m": reference_residuals[sat_index],
                     "wls_residual_m": wls.residuals_m[sat_index] if wls.valid else None,
@@ -977,6 +1083,8 @@ def process_epochs(
                 "time_s": stamp - first_stamp,
                 "epoch_index": epoch_index,
                 "gps_satellite_count": len(prepared_all),
+                "used_systems": ",".join(used_systems),
+                "used_system_count": len(used_systems),
                 "used_satellite_count": len(prepared),
                 "reference_quality": reference.quality,
                 "mean_cn0_dbhz": sum(item.obs.cn0_dbhz for item in prepared if item.obs.cn0_dbhz is not None)
@@ -1006,6 +1114,14 @@ def process_epochs(
                 "raim_abs_mean_m": raim_stats["abs_mean_m"],
                 "raim_max_abs_m": raim_stats["max_abs_m"],
                 "raim_outlier_count": raim_stats["outlier_count"],
+                "doppler_used_count": doppler_stats["count"],
+                "doppler_rms": doppler_stats["rms"],
+                "doppler_abs_mean": doppler_stats["abs_mean"],
+                "doppler_max_abs": doppler_stats["max_abs"],
+                "tdcp_valid_count": tdcp_stats["count"],
+                "tdcp_rms": tdcp_stats["rms"],
+                "tdcp_abs_mean": tdcp_stats["abs_mean"],
+                "tdcp_max_abs": tdcp_stats["max_abs"],
                 "reference_clock_bias_m": reference_clock_bias_m,
                 "reference_degrees_of_freedom": reference_stats["degrees_of_freedom"],
                 "reference_chi_square": reference_stats["chi_square"],
@@ -1027,6 +1143,9 @@ def process_epochs(
         "skipped_epochs": skipped_epochs,
         "no_reference_epochs": no_reference_epochs,
         "systems": sorted({obs.sat_id[0] for obs in observations}),
+        "requested_systems": sorted(parse_systems(args.systems)),
+        "supported_broadcast_systems": sorted(supported_systems),
+        "unsupported_system_counts": unsupported_system_counts,
         "gps_ephemeris_satellites": len(ephemerides),
         "raim_pfa": args.raim_pfa,
         "elevation_mask_deg": args.elevation_mask_deg,
@@ -1072,6 +1191,12 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "cn0_dbhz",
         "sigma_m",
         "weight",
+        "doppler_range_rate_mps",
+        "predicted_range_rate_mps",
+        "doppler_residual_mps",
+        "carrier_phase_m",
+        "tdcp_range_rate_mps",
+        "tdcp_residual_mps",
         "reference_clock_bias_m",
         "reference_residual_m",
         "wls_residual_m",
@@ -1081,6 +1206,8 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "time_s",
         "epoch_index",
         "gps_satellite_count",
+        "used_systems",
+        "used_system_count",
         "used_satellite_count",
         "reference_quality",
         "mean_cn0_dbhz",
@@ -1109,6 +1236,14 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "raim_abs_mean_m",
         "raim_max_abs_m",
         "raim_outlier_count",
+        "doppler_used_count",
+        "doppler_rms",
+        "doppler_abs_mean",
+        "doppler_max_abs",
+        "tdcp_valid_count",
+        "tdcp_rms",
+        "tdcp_abs_mean",
+        "tdcp_max_abs",
         "reference_clock_bias_m",
         "reference_degrees_of_freedom",
         "reference_chi_square",
@@ -1139,8 +1274,7 @@ def main() -> int:
     args = parse_args()
     systems = parse_systems(args.systems)
     if systems - {"G"}:
-        print("warning: only GPS/G broadcast residuals are implemented; non-G systems will be ignored.")
-        systems = {"G"}
+        print("warning: broadcast residuals currently support GPS/G; non-G observations are tracked as unsupported framework inputs.")
     nav_path = clean_path(args.nav)
     assert nav_path is not None
     output_dir = clean_path(args.output_dir)
