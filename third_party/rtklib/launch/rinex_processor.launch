@@ -1,0 +1,23 @@
+<launch>
+    <arg name="rover_obs" default="/home/ys/spoof_detection_ws/full_data/gnss/rover.obs" />
+    <arg name="base_obs" default="/home/ys/spoof_detection_ws/full_data/gnss/base.obs" />
+    <arg name="nav_file" default="/home/ys/spoof_detection_ws/full_data/gnss/BRDM00DLR_S_20240290000_01D_MN.rnx" />
+    <arg name="config_file" default="/home/ys/spoof_detection_ws/full_data/gnss/20240129_ubuntu.conf" />
+    <arg name="output_pos" default="/home/ys/spoof_detection_ws/full_data/gnss/rtklib.pos" />
+    <arg name="start_time" default="" />
+    <arg name="end_time" default="" />
+    <arg name="sync_to_clock" default="false" />
+    <arg name="clock_wait_timeout" default="30.0" />
+
+    <node pkg="rtklib" type="rtklib_rinex_processor" name="rtklib_rinex_processor" output="screen">
+        <param name="rover_obs" value="$(arg rover_obs)" />
+        <param name="base_obs" value="$(arg base_obs)" />
+        <param name="nav_file" value="$(arg nav_file)" />
+        <param name="config_file" value="$(arg config_file)" />
+        <param name="output_pos" value="$(arg output_pos)" />
+        <param name="start_time" value="$(arg start_time)" />
+        <param name="end_time" value="$(arg end_time)" />
+        <param name="sync_to_clock" value="$(arg sync_to_clock)" />
+        <param name="clock_wait_timeout" value="$(arg clock_wait_timeout)" />
+    </node>
+</launch>

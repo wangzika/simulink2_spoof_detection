@@ -61,10 +61,48 @@ if (Python3_EXECUTABLE)
         COMMENT "Generate a Rerun .rrd recording from the simulation CSV"
         VERBATIM
     )
-    set(FULL_DATA_RTKLIB_POS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rtklib.pos")
+    set(FULL_DATA_BASE_OBS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/base.obs")
     set(FULL_DATA_DOP "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/dop.txt")
     set(FULL_DATA_ROVER_OBS "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rover.obs")
     set(FULL_DATA_BROADCAST_NAV "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/BRDM00DLR_S_20240290000_01D_MN.rnx")
+    set(FULL_DATA_RTKLIB_POS_LEGACY "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rtklib.pos")
+    set(FULL_DATA_RTKLIB_POS_FULL "${CMAKE_CURRENT_SOURCE_DIR}/../full_data/gnss/rtklib_full.pos")
+    set(FULL_DATA_RTKLIB_AVAILABLE FALSE)
+    set(FULL_DATA_RTKLIB_POS_DEPS)
+    set(RTKLIB_STANDALONE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rtklib/standalone")
+    if (NOT EXISTS "${RTKLIB_STANDALONE_DIR}/CMakeLists.txt")
+        set(RTKLIB_STANDALONE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../rtklib/standalone")
+    endif()
+    if (EXISTS "${RTKLIB_STANDALONE_DIR}/CMakeLists.txt"
+            AND EXISTS "${FULL_DATA_ROVER_OBS}"
+            AND EXISTS "${FULL_DATA_BASE_OBS}"
+            AND EXISTS "${FULL_DATA_BROADCAST_NAV}")
+        set(FULL_DATA_RTKLIB_POS "${FULL_DATA_RTKLIB_POS_FULL}")
+        set(FULL_DATA_RTKLIB_AVAILABLE TRUE)
+        add_custom_target(rtklib_full_pos
+            COMMAND ${CMAKE_COMMAND}
+                -S ${RTKLIB_STANDALONE_DIR}
+                -B ${CMAKE_CURRENT_BINARY_DIR}/rtklib_standalone_vendor
+            COMMAND ${CMAKE_COMMAND}
+                --build ${CMAKE_CURRENT_BINARY_DIR}/rtklib_standalone_vendor
+                --target rtklib_postpos_cli
+            COMMAND ${CMAKE_CURRENT_BINARY_DIR}/rtklib_standalone_vendor/rtklib_postpos_cli
+                --rover ${FULL_DATA_ROVER_OBS}
+                --base ${FULL_DATA_BASE_OBS}
+                --nav ${FULL_DATA_BROADCAST_NAV}
+                --output ${FULL_DATA_RTKLIB_POS_FULL}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+            COMMENT "Generate a full RTKLIB .pos solution without ROS"
+            VERBATIM
+        )
+        set(FULL_DATA_RTKLIB_POS_DEPS rtklib_full_pos)
+    elseif (EXISTS "${FULL_DATA_RTKLIB_POS_FULL}")
+        set(FULL_DATA_RTKLIB_POS "${FULL_DATA_RTKLIB_POS_FULL}")
+        set(FULL_DATA_RTKLIB_AVAILABLE TRUE)
+    elseif (EXISTS "${FULL_DATA_RTKLIB_POS_LEGACY}")
+        set(FULL_DATA_RTKLIB_POS "${FULL_DATA_RTKLIB_POS_LEGACY}")
+        set(FULL_DATA_RTKLIB_AVAILABLE TRUE)
+    endif()
     set(PAPER_RINEX_SUMMARY_ARGS)
     set(PAPER_RINEX_DEPS)
     set(PAPER_RAW_RESIDUAL_CLEAN_ARGS)
@@ -78,7 +116,7 @@ if (Python3_EXECUTABLE)
     set(FAST_GLIO_LOOSE "${FAST_GLIO_LOG_DIR}/gnss_loose_diag.csv")
     set(FAST_GLIO_RAW "${FAST_GLIO_LOG_DIR}/gnss_raw_update_log.csv")
     set(FAST_GLIO_TIGHT "${FAST_GLIO_LOG_DIR}/gnss_tight_pose.csv")
-    if (EXISTS "${FULL_DATA_RTKLIB_POS}")
+    if (FULL_DATA_RTKLIB_AVAILABLE)
         add_custom_target(adapt_full_data
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/rtklib_dataset_adapter.py
@@ -86,8 +124,9 @@ if (Python3_EXECUTABLE)
                 --dop ${FULL_DATA_DOP}
                 --name full_data_rtklib
                 --output-dir ${CMAKE_CURRENT_BINARY_DIR}/datasets/full_data_rtklib
+            DEPENDS ${FULL_DATA_RTKLIB_POS_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            COMMENT "Adapt ../full_data/gnss/rtklib.pos into waypoint/scenario/replay files"
+            COMMENT "Adapt the full-data RTKLIB solution into waypoint/scenario/replay files"
             VERBATIM
         )
         add_custom_target(simulate_full_data
@@ -99,7 +138,7 @@ if (Python3_EXECUTABLE)
                 --output-dir ${CMAKE_CURRENT_BINARY_DIR}/datasets/full_data_rtklib
             COMMAND $<TARGET_FILE:f7_sim>
                 --scenario ${CMAKE_CURRENT_BINARY_DIR}/datasets/full_data_rtklib/full_data_rtklib.scenario
-            DEPENDS f7_sim
+            DEPENDS f7_sim ${FULL_DATA_RTKLIB_POS_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Run f7_sim along the adapted full_data RTKLIB route"
             VERBATIM
@@ -122,7 +161,7 @@ if (Python3_EXECUTABLE)
             COMMENT "Extract per-satellite RINEX observation features from rover.obs"
             VERBATIM
         )
-        if (EXISTS "${FULL_DATA_BROADCAST_NAV}" AND EXISTS "${FULL_DATA_RTKLIB_POS}")
+        if (EXISTS "${FULL_DATA_BROADCAST_NAV}" AND FULL_DATA_RTKLIB_AVAILABLE)
             set(FULL_DATA_RAW_CLEAN_EPOCH_RESIDUALS
                 "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/raw_gnss_clean/full_data_raw_clean_raw_epoch_residuals.csv")
             set(FULL_DATA_ATTACKED_SATELLITE_FEATURES
@@ -139,11 +178,12 @@ if (Python3_EXECUTABLE)
                     --obs ${FULL_DATA_ROVER_OBS}
                     --nav ${FULL_DATA_BROADCAST_NAV}
                     --rtklib-pos ${FULL_DATA_RTKLIB_POS}
-                    --systems G
+                    --systems G,E
                     --name full_data_raw_clean
                     --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/raw_gnss_clean
+                DEPENDS ${FULL_DATA_RTKLIB_POS_DEPS}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                COMMENT "Compute GPS broadcast-ephemeris pseudorange residuals and RAIM baseline"
+                COMMENT "Compute GPS/Galileo broadcast-ephemeris pseudorange residuals and RAIM baseline"
                 VERBATIM
             )
             add_custom_target(raw_observation_attack
@@ -170,10 +210,10 @@ if (Python3_EXECUTABLE)
                     --satellite-features ${FULL_DATA_ATTACKED_SATELLITE_FEATURES}
                     --nav ${FULL_DATA_BROADCAST_NAV}
                     --rtklib-pos ${FULL_DATA_RTKLIB_POS}
-                    --systems G
+                    --systems G,E
                     --name full_data_raw_attack
                     --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/raw_gnss_attack
-                DEPENDS raw_observation_attack
+                DEPENDS raw_observation_attack ${FULL_DATA_RTKLIB_POS_DEPS}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                 COMMENT "Recompute raw residuals and RAIM after observation-level attack injection"
                 VERBATIM
@@ -181,7 +221,7 @@ if (Python3_EXECUTABLE)
         endif()
     endif()
 
-    if (EXISTS "${FULL_DATA_RTKLIB_POS}" AND EXISTS "${FAST_GLIO_LOOSE}" AND EXISTS "${FAST_GLIO_RAW}")
+    if (FULL_DATA_RTKLIB_AVAILABLE AND EXISTS "${FAST_GLIO_LOOSE}" AND EXISTS "${FAST_GLIO_RAW}")
         add_custom_target(paper_dataset
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_detection_dataset.py
@@ -194,7 +234,7 @@ if (Python3_EXECUTABLE)
                 ${PAPER_RAW_RESIDUAL_CLEAN_ARGS}
                 --name full_data_clean
                 --output-dir ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_clean
-            DEPENDS ${PAPER_RINEX_DEPS} ${PAPER_RAW_RESIDUAL_CLEAN_DEPS}
+            DEPENDS ${FULL_DATA_RTKLIB_POS_DEPS} ${PAPER_RINEX_DEPS} ${PAPER_RAW_RESIDUAL_CLEAN_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Build the clean paper detection dataset from full_data and FAST_GLIO logs"
             VERBATIM
@@ -214,7 +254,7 @@ if (Python3_EXECUTABLE)
                 --attack-window +180:+260
                 --attack-offset 8.0,-3.0,0.5
                 --pseudorange-delay 18.0
-            DEPENDS ${PAPER_RINEX_DEPS} ${PAPER_RAW_RESIDUAL_ATTACK_DEPS}
+            DEPENDS ${FULL_DATA_RTKLIB_POS_DEPS} ${PAPER_RINEX_DEPS} ${PAPER_RAW_RESIDUAL_ATTACK_DEPS}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Build a synthetic spoofing dataset for detector evaluation"
             VERBATIM

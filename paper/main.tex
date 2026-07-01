@@ -348,7 +348,8 @@ Single-satellite outliers are easier for pseudorange monitors, so the gain over 
 The explanatory anomaly type is stable in most detected samples, with dominant-cue fraction \AttackClassificationDominantFraction{}, but it should be interpreted as a diagnosis of which cue fired rather than a final semantic attack classifier.
 
 \section{Limitations}
-The current raw residual engine is GPS-only, and the rover RINEX stream does not expose Doppler observations, so Doppler/TDCP is not yet fully exploited.
+The current raw residual engine uses GPS and Galileo in the main experiments, while BeiDou remains experimental pending GEO/IGSO/MEO-specific corrections and inter-system calibration.
+The rover RINEX stream does not expose Doppler observations in the synchronized interval, so Doppler/TDCP is not yet fully exploited.
 The raw residual overlap with FAST\_GLIO is limited to \RawRaimCoverageRows{} synchronized samples; longer synchronized sequences are needed for final statistical claims.
 The spoofing experiments are synthetic rather than collected from a live RF spoofing campaign.
 They are still useful because the injector modifies observation-level pseudoranges and post-fusion residuals in controlled ways while preserving the real trajectory, satellite geometry, C/N0, DOP, RTK status, and LiDAR--inertial logs.
