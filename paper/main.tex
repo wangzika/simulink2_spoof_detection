@@ -267,6 +267,19 @@ This trade-off is the relevant operating regime for field deployment, where pers
     \label{fig:pareto}
 \end{figure}
 
+\subsection{Visualization Case Study}
+To make the detector behavior inspectable, we additionally provide a visualization experiment on the representative coordinated-spoofing scenario used for the EA-SGLRT timeline.
+Fig.~\ref{fig:visualcase} overlays the attack interval and detections on the RTK trajectory, shows the raw, pseudorange, LiDAR--GNSS, and quality cues, and plots the CUSUM/confidence state together with the environment-quality indicators.
+This view is not used for parameter tuning; it is a diagnostic experiment that verifies whether the numerical detections correspond to interpretable temporal and spatial behavior.
+The visualization shows that alarms occur after sustained multi-cue evidence rather than at the first isolated residual excursion.
+
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=\textwidth]{visualization_experiment.png}
+    \caption{Visualization experiment for a representative coordinated spoofing case. The panels show trajectory-level attack/detection localization, multi-cue evidence and adaptive threshold, sequential CUSUM/confidence evolution, and environmental/raw-observation quality.}
+    \label{fig:visualcase}
+\end{figure*}
+
 \subsection{Attack Factor Study}
 Fig.~\ref{fig:heatmap} summarizes performance across attack strength and ramp duration.
 As expected, low-amplitude and slow-ramp attacks are hardest because their residuals remain comparable to benign motion and multipath.

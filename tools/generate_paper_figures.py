@@ -750,6 +750,105 @@ def plot_adaptive_cusum_timeline(timeline: pd.DataFrame, output_dir: Path) -> No
     savefig(output_dir / "adaptive_cusum_timeline.png")
 
 
+def plot_visualization_experiment(attack: pd.DataFrame, adaptive_timeline: pd.DataFrame, output_dir: Path) -> None:
+    if attack.empty or adaptive_timeline.empty:
+        return
+    n = min(len(attack), len(adaptive_timeline))
+    attack_view = attack.iloc[:n].copy().reset_index(drop=True)
+    timeline = adaptive_timeline.iloc[:n].copy().reset_index(drop=True)
+    t = pd.to_numeric(timeline["time_s"], errors="coerce").fillna(0.0)
+    attack_mask = pd.to_numeric(timeline["attack_label"], errors="coerce").fillna(0.0) > 0
+    detected = pd.to_numeric(timeline["detected"], errors="coerce").fillna(0.0) > 0
+
+    def numeric(frame: pd.DataFrame, column: str, default: float = 0.0) -> pd.Series:
+        if column not in frame:
+            return pd.Series([default] * len(frame))
+        return pd.to_numeric(frame[column], errors="coerce").fillna(default)
+
+    fig, axes = plt.subplots(2, 2, figsize=(9.2, 6.2))
+
+    ax = axes[0, 0]
+    east = numeric(attack_view, "rtk_enu_e_m")
+    north = numeric(attack_view, "rtk_enu_n_m")
+    ax.plot(east, north, color="#495057", linewidth=1.1, label="RTK trajectory")
+    if attack_mask.any():
+        ax.scatter(east[attack_mask], north[attack_mask], s=18, color="#ffd43b", edgecolor="#e67700", linewidth=0.3, label="Attack window")
+    if detected.any():
+        ax.scatter(east[detected], north[detected], s=24, color="#c92a2a", marker="x", label="EA-SGLRT detection")
+    ax.scatter([east.iloc[0]], [north.iloc[0]], marker="o", s=32, color="#2b8a3e", label="Start")
+    ax.scatter([east.iloc[-1]], [north.iloc[-1]], marker="s", s=28, color="#364fc7", label="End")
+    ax.set_title("Trajectory-level visualization")
+    ax.set_xlabel("East (m)")
+    ax.set_ylabel("North (m)")
+    ax.axis("equal")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=7)
+
+    ax = axes[0, 1]
+    def clipped_score(column: str, upper: float = 6.0) -> pd.Series:
+        return numeric(timeline, column).clip(lower=0.0, upper=upper)
+
+    for column, label, color in [
+        ("score_lio", "LIO-GNSS", "#1864ab"),
+        ("score_pseudorange", "Pseudorange", "#e67700"),
+        ("score_raw", "Raw GNSS", "#2b8a3e"),
+        ("score_quality", "Quality", "#5f3dc4"),
+    ]:
+        ax.plot(t, clipped_score(column), linewidth=1.0, label=label, color=color)
+    ax.plot(t, clipped_score("detector_score"), color="#c92a2a", linewidth=1.25, label="Fused evidence")
+    ax.plot(t, clipped_score("adaptive_threshold"), color="#212529", linestyle="--", linewidth=1.0, label="Adaptive threshold")
+    if attack_mask.any():
+        ax.fill_between(t, 0, 6.3, where=attack_mask, color="#ffd43b", alpha=0.18)
+    ax.set_title("Multi-cue evidence")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Score (clipped at 6)")
+    ax.set_ylim(-0.1, 6.3)
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="upper left", fontsize=7, ncol=2)
+
+    ax = axes[1, 0]
+    cusum = numeric(timeline, "cusum")
+    confidence = numeric(timeline, "confidence")
+    ax.plot(t, cusum, color="#2b8a3e", linewidth=1.2, label="CUSUM")
+    ax2 = ax.twinx()
+    ax2.plot(t, confidence, color="#5f3dc4", linewidth=1.0, label="Confidence")
+    if attack_mask.any():
+        ax.fill_between(t, 0, max(1.0, float(cusum.max()) * 1.15), where=attack_mask, color="#ffd43b", alpha=0.18)
+    if detected.any():
+        ax.scatter(t[detected], cusum[detected], s=18, color="#c92a2a", label="Detections", zorder=3)
+    ax.set_title("Sequential decision state")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("CUSUM")
+    ax2.set_ylabel("Confidence")
+    lines, labels = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines + lines2, labels + labels2, loc="upper left", fontsize=7)
+    ax.grid(True, alpha=0.25)
+
+    ax = axes[1, 1]
+    env = numeric(timeline, "environment_degradation")
+    cn0 = numeric(attack_view, "rinex_mean_cn0_dbhz")
+    sats = numeric(attack_view, "rinex_satellite_count")
+    ax.plot(t, env, color="#c92a2a", linewidth=1.2, label="Environment degradation")
+    ax.set_ylabel("Degradation index")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylim(-0.03, max(1.0, float(env.max()) * 1.1))
+    ax2 = ax.twinx()
+    ax2.plot(t, cn0, color="#1864ab", linewidth=1.0, label="Mean C/N0")
+    ax2.plot(t, sats, color="#0b7285", linewidth=0.9, linestyle=":", label="Satellite count")
+    ax2.set_ylabel("C/N0 (dB-Hz) / satellites")
+    if attack_mask.any():
+        ax.fill_between(t, 0, ax.get_ylim()[1], where=attack_mask, color="#ffd43b", alpha=0.18)
+    ax.set_title("Environment and raw-observation quality")
+    lines, labels = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines + lines2, labels + labels2, loc="upper right", fontsize=7)
+    ax.grid(True, alpha=0.25)
+
+    fig.suptitle("Visualization experiment for representative coordinated spoofing", y=1.01, fontsize=10)
+    savefig(output_dir / "visualization_experiment.png")
+
+
 def macro(name: str, value: str) -> str:
     return f"\\newcommand{{\\{name}}}{{{value}}}\n"
 
@@ -972,6 +1071,7 @@ def main() -> int:
     plot_false_alarm_pareto(pareto_summary, output_dir)
     plot_parameter_sensitivity(sensitivity_summary, output_dir)
     plot_adaptive_cusum_timeline(adaptive_timeline, output_dir)
+    plot_visualization_experiment(attack, adaptive_timeline, output_dir)
     write_metrics_tex(
         metrics_tex,
         attack,
