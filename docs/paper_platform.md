@@ -10,9 +10,9 @@
 - FAST_GLIO `gnss_loose_diag.csv`、`gnss_raw_update_log.csv`、`gnss_tight_pose.csv` 与 RTKLIB/DOP 的同时间轴合并。
 - RINEX `rover.obs` 原始观测特征提取：每颗卫星每历元的 code/carrier/Doppler/C/N0、LLI、SSI、码间差、code-Doppler consistency。
 - RINEX 每历元汇总特征合入检测数据集：卫星数、系统数、观测数、C/N0 统计、低 C/N0 卫星数、码间差 RMS、周跳计数。
-- GPS 广播星历原始伪距残差：解析 RINEX navigation，计算 GPS 卫星 ECEF、卫星钟差、仰角/方位角、GNSS-only WLS 后验 RAIM 残差，以及 RTK 参考位置伪距残差。
+- GPS/Galileo/BeiDou 广播星历原始伪距残差框架：解析 RINEX navigation，计算卫星 ECEF、卫星钟差、仰角/方位角、GNSS-only WLS 后验 RAIM 残差，以及 RTK 参考位置伪距残差；WLS/参考残差已支持每星座 clock/inter-system bias 状态。
 - Doppler/TDCP raw residual 框架：从 RINEX/feature CSV 读取 Doppler range-rate 和 carrier phase，输出 per-satellite Doppler/TDCP residual 与 per-epoch RMS/count 统计。
-- 多星座框架：`compute_raw_gnss_residuals.py` 可读取 G/E/C 等系统，当前 GPS/G 广播残差已实现，非 GPS 观测进入 summary 的 unsupported-system 统计，为 Galileo/BDS 扩展预留接口。
+- 多星座框架：`compute_raw_gnss_residuals.py` 可读取 G/E/C 等系统，GPS/G 与 Galileo/E 已在当前真实数据短样本中验证，BeiDou/C 已接入 Kepler 传播和多 clock 状态但真实残差仍标为 experimental，summary 会报告缺失星历和各星座 ephemeris/clock 统计。
 - 观测级攻击注入：直接改写 per-satellite CSV 中的 `primary_code_m`，保留 `clean_primary_code_m`、`injected_pseudorange_bias_m`、攻击标签和 scale。
 - 环境自适应序贯 GLRT：融合 raw GNSS residual、receiver pseudorange GLRT、LiDAR--GNSS residual、DOP/C/N0/RTK ratio/satellite count 环境质量，输出 adaptive threshold、CUSUM、confidence 和攻击类型。
 - 实验矩阵：clean real data、degraded non-attack data、80 个 synthetic spoofing case，覆盖 1/2/5/10 m 强度、1/5/20/60 s ramp、position bias/pseudorange delay/single-satellite outlier/coordinated spoof/slow drift 五类攻击。
@@ -130,10 +130,10 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 
 ## Phase 2: 原始 GNSS 观测层
 
-当前已完成 GPS broadcast 第一版原始残差链路，并补上 Doppler/TDCP 和多星座观测框架。它把 RINEX 原始观测进一步变成检测算法里的统计量：
+当前已完成 GPS/Galileo broadcast 原始残差链路，并补上 BeiDou broadcast 框架、Doppler/TDCP 和多星座观测框架。它把 RINEX 原始观测进一步变成检测算法里的统计量：
 
 - 每颗卫星的 pseudorange、carrier phase、Doppler、C/N0 已抽取；rover.obs 当前 Doppler 可为空，但字段链路已贯通。
-- `tools/compute_raw_gnss_residuals.py` 已实现 GPS 广播星历解析、卫星位置/钟差、仰角/方位角、C/N0/仰角加权、GNSS-only WLS、RAIM chi-square、RTK 参考伪距残差、Doppler residual、TDCP residual。
+- `tools/compute_raw_gnss_residuals.py` 已实现 GPS/Galileo/BeiDou Kepler 广播星历解析、卫星位置/钟差、仰角/方位角、C/N0/仰角加权、多星座 clock-state WLS、RAIM chi-square、RTK 参考伪距残差、Doppler residual、TDCP residual。
 - `tools/inject_observation_attack.py` 已实现观测级 pseudorange bias 注入，输出攻击后的 per-satellite CSV，可以直接送入 raw residual 引擎。
 - 当前 full_data 默认工况使用 G02 单星 outlier + common delay 作为 RAIM stress baseline；coordinated all-satellite spoofing 可能被 WLS 位置/钟差吸收，这是 RAIM-only 的预期局限，不应作为最终方法。
 
@@ -141,11 +141,11 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 
 - 已输出 per-satellite long-format CSV。
 - 已输出 per-epoch summary CSV，并合入检测数据集。
-- 已输出 raw GPS per-satellite residual CSV 和 per-epoch RAIM/reference residual CSV。
+- 已输出 raw GNSS per-satellite residual CSV 和 per-epoch RAIM/reference residual CSV，包含 `used_systems`、`wls_clock_bias_by_system_m`、`reference_clock_bias_by_system_m`。
 - 已输出 Doppler/TDCP residual count/RMS 字段，并合入 `build_detection_dataset.py` 已有 raw Doppler 输入字段。
-- 已通过 `raw_residuals_smoke` 自包含测试：clean RAIM 分数低，Doppler/TDCP residual count 存在，观测级单星攻击后 RAIM 分数升高。
+- 已通过 `raw_residuals_smoke` 自包含测试：clean RAIM 分数低，合成 G/E/C 多星座 WLS 使用 3 个 clock 状态，Doppler/TDCP residual count 存在，观测级单星攻击后 RAIM 分数升高。
 - 已通过 `adaptive_detector_smoke` 自包含测试：持续攻击可检出，环境自适应相对无环境版本降低误报。
-- 待完成：Galileo/BDS 广播星历传播、ionosphere/troposphere correction、严格卫星/接收机速度模型、单差/双差、robust weighting 与 `gnss_raw_update_log.csv` 的 PR RMS/healthy count/outlier count 定量趋势匹配。
+- 待完成：BeiDou GEO/IGSO/MEO 专用修正和系统时差产品、ionosphere/troposphere correction、严格卫星/接收机速度模型、单差/双差、robust weighting 与 `gnss_raw_update_log.csv` 的 PR RMS/healthy count/outlier count 定量趋势匹配。
 
 ## Phase 3: 可发表检测算法
 

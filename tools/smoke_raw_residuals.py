@@ -23,30 +23,37 @@ def nav_values(values: list[float]) -> str:
     return "    " + "".join(f"{value:19.12E}" for value in values) + "\n"
 
 
-def write_nav(path: Path) -> None:
+def write_nav(path: Path, systems: tuple[str, ...] = ("G",), satellites_per_system: int = 6) -> list[str]:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         header("     3.04           NAVIGATION DATA     G (GPS)", "RINEX VERSION / TYPE"),
         header("", "END OF HEADER"),
     ]
     toe_s = 111600.0
-    week = 2299.0
-    sqrt_a = 5153.7954775
-    for prn in range(1, 7):
-        sat = f"G{prn:02d}"
-        m0 = -2.4 + prn * 0.85
-        omega0 = -2.7 + prn * 0.95
-        omega = 0.15 + prn * 0.32
-        i0 = 0.94 + 0.015 * prn
-        lines.append(f"{sat} 2024 01 29 07 00 00 0.000000000000E+00 0.000000000000E+00 0.000000000000E+00\n")
-        lines.append(nav_values([float(prn), 20.0 + prn, 3.8e-9, m0]))
-        lines.append(nav_values([1.0e-6, 0.008 + prn * 1.0e-4, 2.0e-6, sqrt_a]))
-        lines.append(nav_values([toe_s, 1.0e-7, omega0, -1.0e-7]))
-        lines.append(nav_values([i0, 180.0 + prn, omega, -8.0e-9]))
-        lines.append(nav_values([1.0e-10, 1.0, week, 0.0]))
-        lines.append(nav_values([2.0, 0.0, 0.0, float(prn)]))
-        lines.append(nav_values([toe_s, 4.0, 0.0, 0.0]))
+    sat_ids: list[str] = []
+    for system in systems:
+        week = 943.0 if system == "C" else 2299.0
+        sqrt_a = 5440.614025 if system == "E" else 5153.7954775
+        prn_offset = 10 if system == "E" else 5 if system == "C" else 0
+        for local_index in range(1, satellites_per_system + 1):
+            prn = prn_offset + local_index
+            sat = f"{system}{prn:02d}"
+            sat_ids.append(sat)
+            phase_index = local_index + (1 if system == "E" else 2 if system == "C" else 0)
+            m0 = -2.4 + phase_index * 0.85
+            omega0 = -2.7 + phase_index * 0.95
+            omega = 0.15 + phase_index * 0.32
+            i0 = 0.94 + 0.015 * phase_index
+            lines.append(f"{sat} 2024 01 29 07 00 00 0.000000000000E+00 0.000000000000E+00 0.000000000000E+00\n")
+            lines.append(nav_values([float(prn), 20.0 + prn, 3.8e-9, m0]))
+            lines.append(nav_values([1.0e-6, 0.008 + prn * 1.0e-4, 2.0e-6, sqrt_a]))
+            lines.append(nav_values([toe_s, 1.0e-7, omega0, -1.0e-7]))
+            lines.append(nav_values([i0, 180.0 + prn, omega, -8.0e-9]))
+            lines.append(nav_values([1.0e-10, 1.0, week, 0.0]))
+            lines.append(nav_values([2.0, 0.0, 0.0, float(prn)]))
+            lines.append(nav_values([toe_s, 4.0, 0.0, 0.0]))
     path.write_text("".join(lines), encoding="utf-8")
+    return sat_ids
 
 
 def write_pos(path: Path, stamp: float, receiver: raw.ReceiverPosition) -> None:
@@ -64,15 +71,16 @@ def write_pos(path: Path, stamp: float, receiver: raw.ReceiverPosition) -> None:
     )
 
 
-def generate_feature_rows(nav_path: Path, stamps: list[float], receiver: raw.ReceiverPosition) -> list[dict[str, object]]:
+def generate_feature_rows(nav_path: Path, stamps: list[float], receiver: raw.ReceiverPosition, sat_ids: list[str] | None = None) -> list[dict[str, object]]:
     ephemerides = raw.parse_navigation_file(nav_path)
     rows = []
     receiver_clock_bias_m = 72_000.0
     previous_reference_range: dict[str, tuple[float, float]] = {}
+    if sat_ids is None:
+        sat_ids = [f"G{prn:02d}" for prn in range(1, 7)]
     for epoch_index, stamp in enumerate(stamps):
         week, tow = raw.unix_to_gps_week_tow(stamp, 18.0)
-        for prn in range(1, 7):
-            sat_id = f"G{prn:02d}"
+        for sat_index, sat_id in enumerate(sat_ids, start=1):
             eph = raw.select_ephemeris(ephemerides, sat_id, week, tow)
             assert eph is not None
             pseudorange_m = 22_000_000.0
@@ -94,10 +102,10 @@ def generate_feature_rows(nav_path: Path, stamps: list[float], receiver: raw.Rec
                     "time_s": f"{stamp - stamps[0]:.9f}",
                     "epoch_index": epoch_index,
                     "sat_id": sat_id,
-                    "system": "G",
+                    "system": sat_id[:1],
                     "primary_code_type": "C1C",
                     "primary_code_m": f"{pseudorange_m:.9f}",
-                    "primary_carrier_phase_m": f"{geom + prn * 1000.0:.9f}",
+                    "primary_carrier_phase_m": f"{geom + sat_index * 1000.0:.9f}",
                     "doppler_range_rate_mps": doppler_rate,
                     "primary_cn0_dbhz": "48.0",
                     "mean_cn0_dbhz": "48.0",
@@ -131,17 +139,22 @@ def read_epochs(path: Path) -> list[dict[str, str]]:
 def main() -> int:
     root = PROJECT_ROOT / "build" / "raw_residual_smoke"
     nav_path = root / "smoke_nav.rnx"
+    multi_nav_path = root / "smoke_multi_nav.rnx"
     pos_path = root / "smoke.pos"
     features_path = root / "smoke_satellite_features.csv"
+    multi_features_path = root / "smoke_multi_satellite_features.csv"
     clean_dir = root / "clean"
+    multi_dir = root / "multi_constellation"
     attack_dir = root / "attack"
     attacked_features_dir = root / "attacked_features"
 
     receiver = raw.ReceiverPosition(0.0, -2267128.4, 5009529.1, 3221136.9, 1)
     stamp = raw.gps_week_tow_to_unix(2299, 111600.0, 18.0)
     write_nav(nav_path)
+    multi_sat_ids = write_nav(multi_nav_path, systems=("G", "E", "C"), satellites_per_system=4)
     write_pos(pos_path, stamp, receiver)
     write_features(features_path, generate_feature_rows(nav_path, [stamp, stamp + 1.0], receiver))
+    write_features(multi_features_path, generate_feature_rows(multi_nav_path, [stamp, stamp + 1.0], receiver, sat_ids=multi_sat_ids))
 
     run_command(
         [
@@ -169,6 +182,43 @@ def main() -> int:
         raise SystemExit(f"Expected low clean RAIM score, got {clean_epoch}")
     if not any(float(row["doppler_used_count"]) > 0 and float(row["tdcp_valid_count"]) > 0 for row in clean_epochs):
         raise SystemExit(f"Expected Doppler/TDCP residual counts in clean output, got {clean_epochs}")
+
+    run_command(
+        [
+            sys.executable,
+            "tools/compute_raw_gnss_residuals.py",
+            "--satellite-features",
+            str(multi_features_path),
+            "--nav",
+            str(multi_nav_path),
+            "--rtklib-pos",
+            str(pos_path),
+            "--systems",
+            "G,E,C",
+            "--name",
+            "smoke_multi",
+            "--output-dir",
+            str(multi_dir),
+            "--elevation-mask-deg",
+            "-90",
+            "--measurement-sigma-m",
+            "1.0",
+            "--min-satellites",
+            "8",
+        ]
+    )
+    multi_epochs = read_epochs(multi_dir / "smoke_multi_raw_epoch_residuals.csv")
+    multi_epoch = multi_epochs[-1]
+    multi_summary = json.loads((multi_dir / "smoke_multi_raw_residual_summary.json").read_text(encoding="utf-8"))
+    if multi_epoch["used_systems"] != "C,E,G":
+        raise SystemExit(f"Expected G/E/C systems in multi-constellation output, got {multi_epoch}")
+    if int(float(multi_epoch["wls_clock_state_count"])) != 3:
+        raise SystemExit(f"Expected three WLS clock states, got {multi_epoch}")
+    if float(multi_epoch["raim_score"]) > 0.10:
+        raise SystemExit(f"Expected low multi-constellation RAIM score, got {multi_epoch}")
+    for system in ("G", "E", "C"):
+        if system not in multi_summary["broadcast_ephemeris_satellites_by_system"]:
+            raise SystemExit(f"Missing {system} ephemerides in multi summary: {multi_summary}")
 
     run_command(
         [
@@ -222,6 +272,7 @@ def main() -> int:
 
     print("Raw residual smoke test passed")
     print(f"  clean residuals: {clean_dir / 'smoke_clean_raw_epoch_residuals.csv'}")
+    print(f"  multi-constellation residuals: {multi_dir / 'smoke_multi_raw_epoch_residuals.csv'}")
     print(f"  attack residuals: {attack_dir / 'smoke_attack_raw_epoch_residuals.csv'}")
     return 0
 

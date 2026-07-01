@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Compute raw GNSS pseudorange residuals and a transparent RAIM baseline.
 
-The broadcast-orbit implementation currently supports GPS ephemerides, while
-the observation pipeline is multi-constellation aware and records unsupported
-systems for later Galileo/BDS extension. It decodes pseudorange, Doppler, and
-carrier observations from RINEX observation files or a precomputed
-satellite-feature CSV, solves a weighted least-squares GNSS-only position/clock
-estimate, and reports post-fit RAIM, reference-position residuals, Doppler
-range-rate residuals, and TDCP residuals against RTK/known ECEF.
+The broadcast-orbit implementation supports the Kepler broadcast ephemeris
+layout used by GPS, Galileo, and BeiDou RINEX 3 navigation records. It decodes
+pseudorange, Doppler, and carrier observations from RINEX observation files or
+a precomputed satellite-feature CSV, solves a weighted least-squares GNSS-only
+position/clock estimate, and reports post-fit RAIM, reference-position
+residuals, Doppler range-rate residuals, and TDCP residuals against RTK/known
+ECEF.
 """
 
 from __future__ import annotations
@@ -31,14 +31,41 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GPS_EPOCH_UNIX_S = 315964800.0
 SPEED_OF_LIGHT_MPS = 299792458.0
 GPS_MU_M3PS2 = 3.986005e14
+GALILEO_MU_M3PS2 = 3.986004418e14
+BDS_MU_M3PS2 = 3.986004418e14
 EARTH_ROTATION_RADPS = 7.2921151467e-5
 GPS_RELATIVISTIC_F = -4.442807633e-10
 WGS84_A_M = 6378137.0
 WGS84_E2 = 6.69437999014e-3
+SUPPORTED_BROADCAST_SYSTEMS = {"G", "E", "C"}
+SYSTEM_MU_M3PS2 = {
+    "G": GPS_MU_M3PS2,
+    "E": GALILEO_MU_M3PS2,
+    "C": BDS_MU_M3PS2,
+}
+SYSTEM_EARTH_ROTATION_RADPS = {
+    "G": EARTH_ROTATION_RADPS,
+    "E": EARTH_ROTATION_RADPS,
+    "C": EARTH_ROTATION_RADPS,
+}
+SYSTEM_TIME_TO_GPST_OFFSET_S = {
+    "G": 0.0,
+    "E": 0.0,
+    # BeiDou Time is 14 s behind GPST for the 2024-era datasets used here.
+    "C": 14.0,
+}
+SYSTEM_WEEK_OFFSETS_TO_GPS = {
+    # Galileo records in modern MGEX files often already carry GPS-aligned week
+    # numbers. The offset is used only when it makes the broadcast week closer
+    # to the absolute calendar-derived week.
+    "E": 1024,
+    "C": 1356,
+}
 
 
 @dataclass
 class Ephemeris:
+    system: str
     sat_id: str
     toc_week: int
     toc_tow_s: float
@@ -122,6 +149,7 @@ class WlsSolution:
     clock_bias_m: float
     iterations: int
     residuals_m: list[float]
+    clock_bias_by_system_m: dict[str, float] | None = None
 
 
 @dataclass
@@ -139,7 +167,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--receiver-ecef", default="", help="Fallback receiver ECEF x,y,z in meters.")
     parser.add_argument("--name", default="raw_gnss", help="Output file prefix.")
     parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "build" / "paper_platform" / "raw_gnss"))
-    parser.add_argument("--systems", default="G", help="Comma-separated systems to read, e.g. G,E,C. Broadcast residuals currently support GPS/G.")
+    parser.add_argument("--systems", default="G", help="Comma-separated systems to read, e.g. G,E,C. Broadcast residuals support Kepler GPS/Galileo/BDS records.")
     parser.add_argument("--gps-utc-leap-seconds", type=float, default=18.0)
     parser.add_argument("--max-delta-s", type=float, default=1.5, help="Reference-position sync tolerance.")
     parser.add_argument("--elevation-mask-deg", type=float, default=10.0)
@@ -224,6 +252,39 @@ def nav_datetime_to_gps_week_tow(year: int, month: int, day: int, hour: int, min
     return week, gps_seconds - week * 604800.0
 
 
+def normalize_week_tow(week: int, tow_s: float) -> tuple[int, float]:
+    while tow_s >= 604800.0:
+        week += 1
+        tow_s -= 604800.0
+    while tow_s < 0.0:
+        week -= 1
+        tow_s += 604800.0
+    return week, tow_s
+
+
+def system_time_to_gpst(system: str, week: int, tow_s: float) -> tuple[int, float]:
+    offset_s = SYSTEM_TIME_TO_GPST_OFFSET_S.get(system, 0.0)
+    return normalize_week_tow(week, tow_s + offset_s)
+
+
+def broadcast_week_to_gps_week(system: str, raw_week: float, calendar_gps_week: int) -> int:
+    if raw_week <= 0.0:
+        return calendar_gps_week
+    week = int(round(raw_week))
+    offset = SYSTEM_WEEK_OFFSETS_TO_GPS.get(system, 0)
+    shifted = week + offset
+    if offset and abs(shifted - calendar_gps_week) < abs(week - calendar_gps_week):
+        return shifted
+    return week
+
+
+def broadcast_constants(system: str) -> tuple[float, float, float]:
+    mu = SYSTEM_MU_M3PS2.get(system, GPS_MU_M3PS2)
+    earth_rate = SYSTEM_EARTH_ROTATION_RADPS.get(system, EARTH_ROTATION_RADPS)
+    relativistic_f = -2.0 * math.sqrt(mu) / (SPEED_OF_LIGHT_MPS * SPEED_OF_LIGHT_MPS)
+    return mu, earth_rate, relativistic_f
+
+
 def check_gps_time(dt_s: float) -> float:
     half_week = 302400.0
     if dt_s > half_week:
@@ -252,12 +313,26 @@ def is_nav_record_start(line: str) -> bool:
     return len(sat) == 3 and sat[0].isalpha() and sat[1:].isdigit()
 
 
-def parse_gps_ephemeris(record: list[str]) -> Ephemeris | None:
+def broadcast_group_delay_s(system: str, line6: list[float]) -> float:
+    if system == "E":
+        # Galileo line 6 carries BGD terms. Use the first non-zero correction as
+        # a first-order E1 group delay approximation.
+        for value in (line6[2], line6[3]):
+            if abs(value) > 0.0:
+                return value
+        return 0.0
+    return line6[2]
+
+
+def parse_broadcast_ephemeris(record: list[str]) -> Ephemeris | None:
     if len(record) < 8:
         return None
     first = record[0]
     sat_id = first[:3].strip()
-    if not sat_id.startswith("G"):
+    if len(sat_id) < 2:
+        return None
+    system = sat_id[0]
+    if system not in SUPPORTED_BROADCAST_SYSTEMS:
         return None
     match = re.match(
         r"^([A-Z]\d{2})\s+(\d{4})\s+(\d{1,2})\s+(\d{1,2})\s+(\d{1,2})\s+(\d{1,2})\s*(\d{1,2}(?:\.\d*)?)(.*)$",
@@ -275,6 +350,7 @@ def parse_gps_ephemeris(record: list[str]) -> Ephemeris | None:
     except ValueError:
         return None
     toc_week_from_label, toc_tow_s = nav_datetime_to_gps_week_tow(year, month, day, hour, minute, second)
+    toc_week_from_label, toc_tow_s = system_time_to_gpst(system, toc_week_from_label, toc_tow_s)
     af0_s, af1_sps, af2_sps2 = parse_nav_values(match.group(8), start=0, count=3)
 
     line1 = parse_nav_values(record[1])
@@ -284,8 +360,10 @@ def parse_gps_ephemeris(record: list[str]) -> Ephemeris | None:
     line5 = parse_nav_values(record[5])
     line6 = parse_nav_values(record[6])
 
-    gps_week = int(round(line5[2])) if line5[2] > 0 else toc_week_from_label
+    gps_week = broadcast_week_to_gps_week(system, line5[2], toc_week_from_label)
+    gps_week, toe_s = system_time_to_gpst(system, gps_week, line3[0])
     return Ephemeris(
+        system=system,
         sat_id=sat_id,
         toc_week=gps_week,
         toc_tow_s=toc_tow_s,
@@ -300,7 +378,7 @@ def parse_gps_ephemeris(record: list[str]) -> Ephemeris | None:
         eccentricity=line2[1],
         cus_rad=line2[2],
         sqrt_a_m12=line2[3],
-        toe_s=line3[0],
+        toe_s=toe_s,
         cic_rad=line3[1],
         omega0_rad=line3[2],
         cis_rad=line3[3],
@@ -310,7 +388,7 @@ def parse_gps_ephemeris(record: list[str]) -> Ephemeris | None:
         omega_dot_radps=line4[3],
         idot_radps=line5[0],
         gps_week=gps_week,
-        tgd_s=line6[2],
+        tgd_s=broadcast_group_delay_s(system, line6),
         health=line6[1],
     )
 
@@ -333,7 +411,7 @@ def parse_navigation_file(path: Path) -> dict[str, list[Ephemeris]]:
         index += 1
         while index < len(lines) and not is_nav_record_start(lines[index]):
             index += 1
-        ephemeris = parse_gps_ephemeris(lines[start:index])
+        ephemeris = parse_broadcast_ephemeris(lines[start:index])
         if ephemeris is not None:
             by_satellite.setdefault(ephemeris.sat_id, []).append(ephemeris)
 
@@ -364,9 +442,10 @@ def solve_kepler(mean_anomaly: float, eccentricity: float) -> float:
 
 
 def satellite_position_clock(eph: Ephemeris, gps_week: int, transmit_tow_s: float) -> tuple[float, float, float, float]:
+    mu_m3ps2, earth_rotation_radps, relativistic_f = broadcast_constants(eph.system)
     tk = check_gps_time((gps_week - eph.gps_week) * 604800.0 + transmit_tow_s - eph.toe_s)
     semi_major_axis_m = eph.sqrt_a_m12 * eph.sqrt_a_m12
-    mean_motion = math.sqrt(GPS_MU_M3PS2 / (semi_major_axis_m**3)) + eph.delta_n_radps
+    mean_motion = math.sqrt(mu_m3ps2 / (semi_major_axis_m**3)) + eph.delta_n_radps
     mean_anomaly = eph.m0_rad + mean_motion * tk
     eccentric_anomaly = solve_kepler(mean_anomaly, eph.eccentricity)
     sin_e = math.sin(eccentric_anomaly)
@@ -380,7 +459,7 @@ def satellite_position_clock(eph: Ephemeris, gps_week: int, transmit_tow_s: floa
     inclination_rad = eph.i0_rad + eph.idot_radps * tk + eph.cis_rad * sin_2u + eph.cic_rad * cos_2u
     x_orb_m = radius_m * math.cos(corrected_latitude)
     y_orb_m = radius_m * math.sin(corrected_latitude)
-    omega_rad = eph.omega0_rad + (eph.omega_dot_radps - EARTH_ROTATION_RADPS) * tk - EARTH_ROTATION_RADPS * eph.toe_s
+    omega_rad = eph.omega0_rad + (eph.omega_dot_radps - earth_rotation_radps) * tk - earth_rotation_radps * eph.toe_s
 
     cos_omega = math.cos(omega_rad)
     sin_omega = math.sin(omega_rad)
@@ -391,7 +470,7 @@ def satellite_position_clock(eph: Ephemeris, gps_week: int, transmit_tow_s: floa
     z_m = y_orb_m * sin_i
 
     clock_dt_s = check_gps_time((gps_week - eph.toc_week) * 604800.0 + transmit_tow_s - eph.toc_tow_s)
-    relativistic_s = GPS_RELATIVISTIC_F * eph.eccentricity * eph.sqrt_a_m12 * sin_e
+    relativistic_s = relativistic_f * eph.eccentricity * eph.sqrt_a_m12 * sin_e
     clock_s = eph.af0_s + eph.af1_sps * clock_dt_s + eph.af2_sps2 * clock_dt_s * clock_dt_s + relativistic_s - eph.tgd_s
     return x_m, y_m, z_m, clock_s
 
@@ -779,49 +858,64 @@ def solve_linear_system(a: list[list[float]], b: list[float]) -> list[float] | N
 
 
 def solve_wls(observations: list[PreparedObservation], reference: ReceiverPosition) -> WlsSolution:
-    if len(observations) < 4:
+    systems = sorted({item.obs.sat_id[:1] for item in observations})
+    state_count = 3 + len(systems)
+    if len(observations) < state_count:
         return WlsSolution(False, reference.x_m, reference.y_m, reference.z_m, 0.0, 0, [])
+    clock_index = {system: 3 + index for index, system in enumerate(systems)}
 
     x_m, y_m, z_m = reference.x_m, reference.y_m, reference.z_m
-    initial_preclock = []
+    initial_preclock_by_system: dict[str, list[float]] = {system: [] for system in systems}
     for item in observations:
         rho_m = norm3(item.sat_x_m - x_m, item.sat_y_m - y_m, item.sat_z_m - z_m)
-        initial_preclock.append(item.observed_pseudorange_m - (rho_m - SPEED_OF_LIGHT_MPS * item.sat_clock_s))
-    clock_bias_m = median(initial_preclock) if initial_preclock else 0.0
+        initial_preclock_by_system[item.obs.sat_id[:1]].append(item.observed_pseudorange_m - (rho_m - SPEED_OF_LIGHT_MPS * item.sat_clock_s))
+    clock_bias_by_system_m = {
+        system: median(values)
+        for system, values in initial_preclock_by_system.items()
+        if values
+    }
     iterations = 0
 
     for iteration in range(8):
-        normal = [[0.0 for _ in range(4)] for _ in range(4)]
-        rhs = [0.0 for _ in range(4)]
+        normal = [[0.0 for _ in range(state_count)] for _ in range(state_count)]
+        rhs = [0.0 for _ in range(state_count)]
         for item in observations:
+            system = item.obs.sat_id[:1]
             dx = item.sat_x_m - x_m
             dy = item.sat_y_m - y_m
             dz = item.sat_z_m - z_m
             rho_m = max(1.0, norm3(dx, dy, dz))
-            predicted_m = rho_m + clock_bias_m - SPEED_OF_LIGHT_MPS * item.sat_clock_s
+            predicted_m = rho_m + clock_bias_by_system_m.get(system, 0.0) - SPEED_OF_LIGHT_MPS * item.sat_clock_s
             residual_m = item.observed_pseudorange_m - predicted_m
-            h = [(x_m - item.sat_x_m) / rho_m, (y_m - item.sat_y_m) / rho_m, (z_m - item.sat_z_m) / rho_m, 1.0]
-            for row in range(4):
+            h = [0.0 for _ in range(state_count)]
+            h[0] = (x_m - item.sat_x_m) / rho_m
+            h[1] = (y_m - item.sat_y_m) / rho_m
+            h[2] = (z_m - item.sat_z_m) / rho_m
+            h[clock_index[system]] = 1.0
+            for row in range(state_count):
                 rhs[row] += item.weight * h[row] * residual_m
-                for col in range(4):
+                for col in range(state_count):
                     normal[row][col] += item.weight * h[row] * h[col]
         delta = solve_linear_system(normal, rhs)
         if delta is None:
-            return WlsSolution(False, x_m, y_m, z_m, clock_bias_m, iteration, [])
+            return WlsSolution(False, x_m, y_m, z_m, representative_clock_bias(clock_bias_by_system_m), iteration, [], clock_bias_by_system_m)
         x_m += delta[0]
         y_m += delta[1]
         z_m += delta[2]
-        clock_bias_m += delta[3]
+        for system, index in clock_index.items():
+            clock_bias_by_system_m[system] = clock_bias_by_system_m.get(system, 0.0) + delta[index]
         iterations = iteration + 1
-        if norm3(delta[0], delta[1], delta[2]) < 1e-4 and abs(delta[3]) < 1e-4:
+        max_clock_delta = max(abs(delta[index]) for index in clock_index.values()) if clock_index else 0.0
+        if norm3(delta[0], delta[1], delta[2]) < 1e-4 and max_clock_delta < 1e-4:
             break
 
     residuals = []
     for item in observations:
+        system = item.obs.sat_id[:1]
         rho_m = norm3(item.sat_x_m - x_m, item.sat_y_m - y_m, item.sat_z_m - z_m)
-        predicted_m = rho_m + clock_bias_m - SPEED_OF_LIGHT_MPS * item.sat_clock_s
+        predicted_m = rho_m + clock_bias_by_system_m.get(system, 0.0) - SPEED_OF_LIGHT_MPS * item.sat_clock_s
         residuals.append(item.observed_pseudorange_m - predicted_m)
-    return WlsSolution(True, x_m, y_m, z_m, clock_bias_m, iterations, residuals)
+    return WlsSolution(True, x_m, y_m, z_m, representative_clock_bias(clock_bias_by_system_m), iterations, residuals, clock_bias_by_system_m)
 
 
 def median(values: Iterable[float]) -> float:
@@ -839,6 +933,18 @@ def weighted_mean(values: list[float], weights: list[float]) -> float:
     if total_weight <= 0.0:
         return sum(values) / len(values) if values else 0.0
     return sum(value * weight for value, weight in zip(values, weights)) / total_weight
+
+
+def representative_clock_bias(clock_bias_by_system_m: dict[str, float]) -> float:
+    if not clock_bias_by_system_m:
+        return 0.0
+    if "G" in clock_bias_by_system_m:
+        return clock_bias_by_system_m["G"]
+    return sum(clock_bias_by_system_m.values()) / len(clock_bias_by_system_m)
+
+
+def format_clock_bias_by_system(clock_bias_by_system_m: dict[str, float]) -> str:
+    return ";".join(f"{system}:{clock_bias_by_system_m[system]:.6f}" for system in sorted(clock_bias_by_system_m))
 
 
 def rms(values: Iterable[float]) -> float:
@@ -932,15 +1038,19 @@ def process_epochs(
     epoch_rows: list[dict[str, object]] = []
     skipped_epochs = 0
     no_reference_epochs = 0
-    supported_systems = {"G"}
+    supported_systems = SUPPORTED_BROADCAST_SYSTEMS
     unsupported_system_counts: dict[str, int] = {}
+    missing_ephemeris_counts: dict[str, int] = {}
     previous_satellite_state: dict[str, dict[str, float]] = {}
 
     for (stamp, epoch_index) in sorted(grouped):
         epoch_observations = grouped[(stamp, epoch_index)]
         for obs in epoch_observations:
-            if obs.sat_id[:1] not in supported_systems:
-                unsupported_system_counts[obs.sat_id[:1]] = unsupported_system_counts.get(obs.sat_id[:1], 0) + 1
+            system = obs.sat_id[:1]
+            if system not in supported_systems:
+                unsupported_system_counts[system] = unsupported_system_counts.get(system, 0) + 1
+            elif obs.sat_id not in ephemerides:
+                missing_ephemeris_counts[system] = missing_ephemeris_counts.get(system, 0) + 1
         reference = nearest_position(positions, stamp, args.max_delta_s, fallback_position)
         if reference is None:
             no_reference_epochs += 1
@@ -969,22 +1079,36 @@ def process_epochs(
             item.observed_pseudorange_m - (item.reference_range_m - SPEED_OF_LIGHT_MPS * item.sat_clock_s)
             for item in prepared
         ]
-        reference_clock_bias_m = weighted_mean(preclock_residuals, [item.weight for item in prepared])
-        reference_residuals = [value - reference_clock_bias_m for value in preclock_residuals]
+        reference_values_by_system: dict[str, list[float]] = {}
+        reference_weights_by_system: dict[str, list[float]] = {}
+        for value, item in zip(preclock_residuals, prepared):
+            system = item.obs.sat_id[:1]
+            reference_values_by_system.setdefault(system, []).append(value)
+            reference_weights_by_system.setdefault(system, []).append(item.weight)
+        reference_clock_bias_by_system_m = {
+            system: weighted_mean(values, reference_weights_by_system[system])
+            for system, values in reference_values_by_system.items()
+        }
+        reference_clock_bias_m = representative_clock_bias(reference_clock_bias_by_system_m)
+        reference_residuals = [
+            value - reference_clock_bias_by_system_m.get(item.obs.sat_id[:1], reference_clock_bias_m)
+            for value, item in zip(preclock_residuals, prepared)
+        ]
         reference_stats = residual_stats(
             reference_residuals,
             sigmas,
-            max(1, len(reference_residuals) - 1),
+            max(1, len(reference_residuals) - len(reference_clock_bias_by_system_m)),
             args.raim_pfa,
             args.outlier_sigma,
             args.outlier_abs_m,
         )
 
         wls = solve_wls(prepared, reference)
+        wls_clock_count = len(wls.clock_bias_by_system_m or {})
         raim_stats = residual_stats(
             wls.residuals_m,
             sigmas,
-            max(1, len(wls.residuals_m) - 4),
+            max(1, len(wls.residuals_m) - (3 + wls_clock_count)),
             args.raim_pfa,
             args.outlier_sigma,
             args.outlier_abs_m,
@@ -1036,6 +1160,7 @@ def process_epochs(
             if item.obs.attack_label or abs(item.obs.injected_pseudorange_bias_m + item.direct_attack_bias_m) > 1e-9
         )
         row_by_sat = {item.obs.sat_id: idx for idx, item in enumerate(prepared)}
+        input_systems = sorted({obs.sat_id[:1] for obs in epoch_observations})
         used_systems = sorted({item.obs.sat_id[:1] for item in prepared})
         for item in prepared:
             sat_index = row_by_sat[item.obs.sat_id]
@@ -1045,6 +1170,7 @@ def process_epochs(
                     "stamp": stamp,
                     "time_s": stamp - first_stamp,
                     "epoch_index": epoch_index,
+                    "system": item.obs.sat_id[:1],
                     "sat_id": item.obs.sat_id,
                     "code_type": item.obs.code_type,
                     "observed_pseudorange_m": item.observed_pseudorange_m,
@@ -1072,6 +1198,7 @@ def process_epochs(
                     "tdcp_range_rate_mps": rate_row.get("tdcp_range_rate_mps"),
                     "tdcp_residual_mps": rate_row.get("tdcp_residual_mps"),
                     "reference_clock_bias_m": reference_clock_bias_m,
+                    "reference_clock_bias_by_system_m": format_clock_bias_by_system(reference_clock_bias_by_system_m),
                     "reference_residual_m": reference_residuals[sat_index],
                     "wls_residual_m": wls.residuals_m[sat_index] if wls.valid else None,
                 }
@@ -1082,6 +1209,9 @@ def process_epochs(
                 "stamp": stamp,
                 "time_s": stamp - first_stamp,
                 "epoch_index": epoch_index,
+                "input_systems": ",".join(input_systems),
+                "input_system_count": len(input_systems),
+                "input_satellite_count": len(epoch_observations),
                 "gps_satellite_count": len(prepared_all),
                 "used_systems": ",".join(used_systems),
                 "used_system_count": len(used_systems),
@@ -1099,6 +1229,8 @@ def process_epochs(
                 "wls_ecef_y_m": wls.y_m,
                 "wls_ecef_z_m": wls.z_m,
                 "wls_clock_bias_m": wls.clock_bias_m,
+                "wls_clock_bias_by_system_m": format_clock_bias_by_system(wls.clock_bias_by_system_m or {}),
+                "wls_clock_state_count": wls_clock_count,
                 "wls_iterations": wls.iterations,
                 "wls_delta_e_m": wls_de,
                 "wls_delta_n_m": wls_dn,
@@ -1123,6 +1255,8 @@ def process_epochs(
                 "tdcp_abs_mean": tdcp_stats["abs_mean"],
                 "tdcp_max_abs": tdcp_stats["max_abs"],
                 "reference_clock_bias_m": reference_clock_bias_m,
+                "reference_clock_bias_by_system_m": format_clock_bias_by_system(reference_clock_bias_by_system_m),
+                "reference_clock_state_count": len(reference_clock_bias_by_system_m),
                 "reference_degrees_of_freedom": reference_stats["degrees_of_freedom"],
                 "reference_chi_square": reference_stats["chi_square"],
                 "reference_threshold": reference_stats["threshold"],
@@ -1136,6 +1270,13 @@ def process_epochs(
             }
         )
 
+    ephemeris_satellites_by_system: dict[str, int] = {}
+    ephemeris_records_by_system: dict[str, int] = {}
+    for sat_id, items in ephemerides.items():
+        system = sat_id[:1]
+        ephemeris_satellites_by_system[system] = ephemeris_satellites_by_system.get(system, 0) + 1
+        ephemeris_records_by_system[system] = ephemeris_records_by_system.get(system, 0) + len(items)
+
     summary = {
         "epochs_with_input": len(grouped),
         "epochs_written": len(epoch_rows),
@@ -1145,8 +1286,18 @@ def process_epochs(
         "systems": sorted({obs.sat_id[0] for obs in observations}),
         "requested_systems": sorted(parse_systems(args.systems)),
         "supported_broadcast_systems": sorted(supported_systems),
+        "experimental_broadcast_systems": ["C"],
+        "broadcast_model_note": (
+            "GPS/Galileo Kepler broadcast residuals are validated on the current data. "
+            "BeiDou/C is parsed with multi-clock WLS support, but real-data residuals "
+            "still need BDS GEO/IGSO/MEO and system-correction calibration."
+        ),
         "unsupported_system_counts": unsupported_system_counts,
-        "gps_ephemeris_satellites": len(ephemerides),
+        "missing_ephemeris_counts": missing_ephemeris_counts,
+        "gps_ephemeris_satellites": ephemeris_satellites_by_system.get("G", 0),
+        "broadcast_ephemeris_satellites": len(ephemerides),
+        "broadcast_ephemeris_satellites_by_system": ephemeris_satellites_by_system,
+        "broadcast_ephemeris_records_by_system": ephemeris_records_by_system,
         "raim_pfa": args.raim_pfa,
         "elevation_mask_deg": args.elevation_mask_deg,
         "min_satellites": args.min_satellites,
@@ -1171,6 +1322,7 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "stamp",
         "time_s",
         "epoch_index",
+        "system",
         "sat_id",
         "code_type",
         "observed_pseudorange_m",
@@ -1198,6 +1350,7 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "tdcp_range_rate_mps",
         "tdcp_residual_mps",
         "reference_clock_bias_m",
+        "reference_clock_bias_by_system_m",
         "reference_residual_m",
         "wls_residual_m",
     ]
@@ -1205,6 +1358,9 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "stamp",
         "time_s",
         "epoch_index",
+        "input_systems",
+        "input_system_count",
+        "input_satellite_count",
         "gps_satellite_count",
         "used_systems",
         "used_system_count",
@@ -1221,6 +1377,8 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "wls_ecef_y_m",
         "wls_ecef_z_m",
         "wls_clock_bias_m",
+        "wls_clock_bias_by_system_m",
+        "wls_clock_state_count",
         "wls_iterations",
         "wls_delta_e_m",
         "wls_delta_n_m",
@@ -1245,6 +1403,8 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
         "tdcp_abs_mean",
         "tdcp_max_abs",
         "reference_clock_bias_m",
+        "reference_clock_bias_by_system_m",
+        "reference_clock_state_count",
         "reference_degrees_of_freedom",
         "reference_chi_square",
         "reference_threshold",
@@ -1273,8 +1433,6 @@ def write_outputs(output_dir: Path, name: str, satellite_rows: list[dict[str, ob
 def main() -> int:
     args = parse_args()
     systems = parse_systems(args.systems)
-    if systems - {"G"}:
-        print("warning: broadcast residuals currently support GPS/G; non-G observations are tracked as unsupported framework inputs.")
     nav_path = clean_path(args.nav)
     assert nav_path is not None
     output_dir = clean_path(args.output_dir)

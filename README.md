@@ -181,7 +181,7 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 
 - `tools/build_detection_dataset.py` merges RTKLIB `.pos`/DOP data with FAST_GLIO loose/raw/tight GNSS logs.
 - `tools/extract_rinex_features.py` extracts RINEX per-satellite raw observation features and per-epoch summaries.
-- `tools/compute_raw_gnss_residuals.py` parses GPS broadcast ephemerides, computes raw pseudorange residuals, writes RAIM/reference residual summaries, and now emits Doppler/TDCP residual statistics with a multi-constellation observation framework.
+- `tools/compute_raw_gnss_residuals.py` parses GPS/Galileo/BeiDou Kepler broadcast ephemerides, estimates per-constellation clock states, computes raw pseudorange residuals, writes RAIM/reference residual summaries, and emits Doppler/TDCP residual statistics. GPS/Galileo residuals are validated on the current data; BeiDou is wired through the framework and marked experimental pending BDS-specific corrections.
 - `tools/inject_observation_attack.py` injects reproducible observation-level pseudorange attacks into per-satellite RINEX feature CSVs.
 - `tools/adaptive_sequential_detector.py` implements the Environment-Adaptive Sequential GLRT detector plus RAIM, robust RAIM, EKF innovation, pseudorange GLRT, LIO-GNSS, fixed fused, fixed CUSUM fused, adaptive fused, and ablation detectors.
 - `tools/run_experiment_matrix.py` generates clean, degraded non-attack, multi-strength, multi-ramp, multi-type spoofing experiments, baseline/ablation comparisons, attack-factor summaries, and parameter-sensitivity sweeps.
@@ -240,6 +240,21 @@ python tools/compute_raw_gnss_residuals.py \
   --name full_data_raw_clean \
   --output-dir build/paper_platform/raw_gnss_clean
 ```
+
+Run the multi-constellation raw-residual framework on a short GPS/Galileo/BeiDou sample:
+
+```bash
+python tools/compute_raw_gnss_residuals.py \
+  --obs ../full_data/gnss/rover.obs \
+  --nav ../full_data/gnss/BRDM00DLR_S_20240290000_01D_MN.rnx \
+  --rtklib-pos ../full_data/gnss/rtklib.pos \
+  --systems G,E,C \
+  --max-epochs 80 \
+  --name multi_gnss_smoke \
+  --output-dir build/paper_platform/multi_gnss_smoke
+```
+
+The output summary reports `supported_broadcast_systems`, ephemeris counts by constellation, missing ephemerides, used systems, and per-system WLS/reference clock biases.
 
 Inject an observation-level pseudorange attack and recompute raw residuals:
 

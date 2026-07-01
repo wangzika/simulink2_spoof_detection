@@ -39,13 +39,13 @@ Urban canyon multipath, weak signals, poor DOP, and RTK ambiguity changes can pr
 This is the central gap addressed here: a detector should become cautious under benign degradation without becoming blind to coordinated spoofing.
 
 We develop a reproducible method and platform for this problem.
-The platform extracts RINEX raw observations, parses GPS broadcast ephemerides, computes pseudorange residuals and RAIM statistics, aligns RTKLIB and FAST\_GLIO diagnostics, and evaluates detectors over controlled spoofing and degradation scenarios.
+The platform extracts RINEX raw observations, parses GPS/Galileo broadcast ephemerides with an experimental BeiDou path, computes pseudorange residuals and RAIM statistics, aligns RTKLIB and FAST\_GLIO diagnostics, and evaluates detectors over controlled spoofing and degradation scenarios.
 The method, EA-SGLRT, turns these synchronized streams into environment-normalized evidence and applies sequential confirmation.
 
 The contributions are:
 \begin{itemize}
     \item an environment-adaptive sequential GLRT that jointly uses raw GNSS residuals, receiver pseudorange diagnostics, and LiDAR--inertial consistency;
-    \item a GPS broadcast-ephemeris residual engine with weighted least-squares positioning, RAIM chi-square statistics, and RTK-reference pseudorange residuals;
+    \item a multi-constellation broadcast-ephemeris residual engine with per-constellation clock states, weighted least-squares positioning, RAIM chi-square statistics, and RTK-reference pseudorange residuals;
     \item an observation-level pseudorange attack injector and an \MatrixScenarioCount{}-scenario experiment matrix covering clean, degraded, and synthetic spoofing cases;
     \item reproducible comparisons against RAIM-only, robust RAIM, EKF innovation, pseudorange-GLRT-only, LiDAR--GNSS-only, fixed fused, fixed CUSUM, adaptive non-sequential, and sensor-ablation baselines.
 \end{itemize}
@@ -182,7 +182,7 @@ EA-SGLRT & \AdaptiveSeqPrecision{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFone{} &
 \subsection{Attack Factor Study}
 Fig.~\ref{fig:heatmap} summarizes performance across attack strength and ramp duration.
 As expected, low-amplitude and slow-ramp attacks are hardest because their residuals remain comparable to benign motion and multipath.
-The sequential detector improves stability by accumulating weak evidence, but the results still expose the need for longer real overlap sequences and multi-constellation raw residuals.
+The sequential detector improves stability by accumulating weak evidence, but the results still expose the need for longer real overlap sequences and mature BeiDou-specific raw residual corrections.
 Across attack types, the best mean F1 is obtained for \AttackTypeBestName{} attacks (\AttackTypeBestFone{}), while the hardest type is \AttackTypeWorstName{} with F1 \AttackTypeWorstFone{} and recall \AttackTypeWorstRecall{}.
 
 \begin{figure}[!t]
@@ -255,7 +255,7 @@ The current parameter sweep is a first robustness check; future work should tune
 \section{Conclusion}
 This paper converts the previous platform draft into a method-oriented detector: an environment-adaptive sequential GLRT that fuses raw GNSS and LiDAR--inertial consistency.
 The implementation is fully reproducible from the repository targets, generates a multi-scenario experiment matrix, and shows improved F1, lower degraded-environment false alarms, and stable parameter behavior compared with fixed-threshold fusion.
-The next research step is multi-constellation raw residual modeling, route-held-out validation, and real or replayed spoofing evaluation on longer degraded field sequences.
+The next research step is BeiDou-specific raw residual calibration, route-held-out validation, and real or replayed spoofing evaluation on longer degraded field sequences.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
