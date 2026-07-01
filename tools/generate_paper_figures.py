@@ -309,21 +309,27 @@ def plot_constellation_distribution(summary: dict, output_dir: Path) -> None:
 def plot_adaptive_baseline_comparison(detector_summary: pd.DataFrame, output_dir: Path) -> None:
     order = [
         "raim_only",
+        "robust_raim",
+        "ekf_innovation",
         "pseudorange_glrt_only",
         "lio_residual_only",
         "fixed_fused",
+        "fixed_cusum_fused",
         "adaptive_seq_full",
     ]
     labels = {
         "raim_only": "RAIM",
+        "robust_raim": "Robust RAIM",
+        "ekf_innovation": "EKF innov.",
         "pseudorange_glrt_only": "PR GLRT",
         "lio_residual_only": "LIO-GNSS",
         "fixed_fused": "Fixed fused",
+        "fixed_cusum_fused": "Fixed CUSUM",
         "adaptive_seq_full": "Adaptive seq.",
     }
     data = detector_summary.set_index("detector").loc[[item for item in order if item in set(detector_summary["detector"])]]
     x = np.arange(len(data))
-    fig, ax = plt.subplots(figsize=(8.8, 3.9))
+    fig, ax = plt.subplots(figsize=(10.2, 4.1))
     ax.bar(x - 0.18, data["attack_f1_mean"], width=0.36, label="Attack F1", color="#1864ab")
     ax.bar(x + 0.18, data["mean_false_alarm_per_min"] / max(1.0, float(data["mean_false_alarm_per_min"].max())), width=0.36, label="FA/min (normalized)", color="#e67700")
     ax.set_xticks(x)
@@ -423,19 +429,31 @@ def plot_attack_type_breakdown(attack_type_summary: pd.DataFrame, output_dir: Pa
 
 
 def plot_environment_false_alarm(environment_summary: pd.DataFrame, output_dir: Path) -> None:
-    order = ["raim_only", "pseudorange_glrt_only", "lio_residual_only", "fixed_fused", "adaptive_seq_full"]
+    order = [
+        "raim_only",
+        "robust_raim",
+        "ekf_innovation",
+        "pseudorange_glrt_only",
+        "lio_residual_only",
+        "fixed_fused",
+        "fixed_cusum_fused",
+        "adaptive_seq_full",
+    ]
     labels = {
         "raim_only": "RAIM",
+        "robust_raim": "Robust RAIM",
+        "ekf_innovation": "EKF innov.",
         "pseudorange_glrt_only": "PR GLRT",
         "lio_residual_only": "LIO-GNSS",
         "fixed_fused": "Fixed fused",
+        "fixed_cusum_fused": "Fixed CUSUM",
         "adaptive_seq_full": "EA-SGLRT",
     }
     data = environment_summary.set_index("detector").loc[[item for item in order if item in set(environment_summary["detector"])]]
     x = np.arange(len(data))
     clean = data["clean_false_alarm_per_min"].to_numpy(dtype=float)
     degraded = data["degraded_false_alarm_per_min"].to_numpy(dtype=float)
-    fig, ax = plt.subplots(figsize=(8.6, 3.9))
+    fig, ax = plt.subplots(figsize=(10.2, 4.1))
     ax.bar(x - 0.18, np.maximum(clean, 1e-3), width=0.36, label="Clean", color="#1864ab")
     ax.bar(x + 0.18, np.maximum(degraded, 1e-3), width=0.36, label="Degraded non-attack", color="#e67700")
     ax.set_yscale("log")
@@ -618,6 +636,18 @@ def write_metrics_tex(
         macro("RaimOnlyFone", f"{dvalue('raim_only', 'attack_f1_mean'):.3f}"),
         macro("RaimOnlyPrecision", f"{dvalue('raim_only', 'attack_precision_mean'):.3f}"),
         macro("RaimOnlyRecall", f"{dvalue('raim_only', 'attack_recall_mean'):.3f}"),
+        macro("RobustRaimFone", f"{dvalue('robust_raim', 'attack_f1_mean'):.3f}"),
+        macro("RobustRaimPrecision", f"{dvalue('robust_raim', 'attack_precision_mean'):.3f}"),
+        macro("RobustRaimRecall", f"{dvalue('robust_raim', 'attack_recall_mean'):.3f}"),
+        macro("RobustRaimFalseAlarm", f"{dvalue('robust_raim', 'mean_false_alarm_per_min'):.3f}"),
+        macro("EkfInnovationFone", f"{dvalue('ekf_innovation', 'attack_f1_mean'):.3f}"),
+        macro("EkfInnovationPrecision", f"{dvalue('ekf_innovation', 'attack_precision_mean'):.3f}"),
+        macro("EkfInnovationRecall", f"{dvalue('ekf_innovation', 'attack_recall_mean'):.3f}"),
+        macro("EkfInnovationFalseAlarm", f"{dvalue('ekf_innovation', 'mean_false_alarm_per_min'):.3f}"),
+        macro("FixedCusumFusedFone", f"{dvalue('fixed_cusum_fused', 'attack_f1_mean'):.3f}"),
+        macro("FixedCusumFusedPrecision", f"{dvalue('fixed_cusum_fused', 'attack_precision_mean'):.3f}"),
+        macro("FixedCusumFusedRecall", f"{dvalue('fixed_cusum_fused', 'attack_recall_mean'):.3f}"),
+        macro("FixedCusumFusedFalseAlarm", f"{dvalue('fixed_cusum_fused', 'mean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveFusedFone", f"{dvalue('adaptive_fused', 'attack_f1_mean'):.3f}"),
         macro("AdaptiveFusedPrecision", f"{dvalue('adaptive_fused', 'attack_precision_mean'):.3f}"),
         macro("AdaptiveFusedRecall", f"{dvalue('adaptive_fused', 'attack_recall_mean'):.3f}"),

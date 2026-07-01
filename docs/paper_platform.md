@@ -16,7 +16,7 @@
 - 观测级攻击注入：直接改写 per-satellite CSV 中的 `primary_code_m`，保留 `clean_primary_code_m`、`injected_pseudorange_bias_m`、攻击标签和 scale。
 - 环境自适应序贯 GLRT：融合 raw GNSS residual、receiver pseudorange GLRT、LiDAR--GNSS residual、DOP/C/N0/RTK ratio/satellite count 环境质量，输出 adaptive threshold、CUSUM、confidence 和攻击类型。
 - 实验矩阵：clean real data、degraded non-attack data、80 个 synthetic spoofing case，覆盖 1/2/5/10 m 强度、1/5/20/60 s ramp、position bias/pseudorange delay/single-satellite outlier/coordinated spoof/slow drift 五类攻击。
-- Baseline/ablation：RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、fixed fused、adaptive fused、EA-SGLRT、no raw、no LIO、no environment、no CUSUM。
+- Baseline/ablation：RAIM-only、robust RAIM、EKF innovation、pseudorange GLRT-only、LIO-GNSS-only、fixed fused、fixed CUSUM fused、adaptive fused、EA-SGLRT、no raw、no LIO、no environment、no CUSUM。
 - ML baseline：`tools/ml_baseline.py` 提供无 sklearn 依赖的浅树集成分类器，`route_split_experiments.py` 可在 train routes 上训练并在 test routes 上作为 optional baseline 对比。
 - Route split：`tools/route_split_experiments.py` 支持多 route detection CSV，train-route 调参、test-route 评估，输出 tuning/test/train/detector summary。
 - Route registry：`datasets/routes.yaml` 记录 route 数据源、train/test split 和实验矩阵；`tools/run_configured_routes.py` 可从配置直接生成 route-held-out 结果和 manifest。
@@ -159,7 +159,7 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 验收标准：
 
 - 当前矩阵中 EA-SGLRT 在 82 场景上取得 mean attack F1 高于 fixed fused，同时 mean false alarms/min 更低。
-- 已包含固定阈值、RAIM-only、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
+- 已包含固定阈值、固定 CUSUM、RAIM-only、robust RAIM、EKF innovation、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
 - 已补充 attack type/strength/ramp breakdown、clean/degraded false-alarm breakdown、参数敏感性和 paired bootstrap/sign-test。
 - 已新增 route-held-out 实验入口、配置化 route registry 和 ML tree-ensemble optional baseline。
 - 下一步要把 degraded non-attack 从合成降质扩展为真实 urban/open-sky 分段，并用不同 route 做真正 held-out 结论。

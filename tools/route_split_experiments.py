@@ -254,9 +254,12 @@ def evaluate_split(
     rows: list[dict[str, object]] = []
     detectors = [
         "raim_only",
+        "robust_raim",
+        "ekf_innovation",
         "pseudorange_glrt_only",
         "lio_residual_only",
         "fixed_fused",
+        "fixed_cusum_fused",
         "adaptive_fused",
         "adaptive_seq_full",
     ]

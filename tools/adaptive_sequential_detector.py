@@ -39,9 +39,12 @@ class DetectorOutput:
 
 DETECTORS = [
     "raim_only",
+    "robust_raim",
+    "ekf_innovation",
     "pseudorange_glrt_only",
     "lio_residual_only",
     "fixed_fused",
+    "fixed_cusum_fused",
     "adaptive_fused",
     "adaptive_seq_full",
     "adaptive_seq_no_raw",
@@ -120,6 +123,10 @@ def finite(value: float) -> float:
     if math.isnan(value) or math.isinf(value):
         return 0.0
     return value
+
+
+def capped_score(value: float, cap: float) -> float:
+    return min(max(0.0, finite(value)), cap)
 
 
 def median_dt(times: list[float]) -> float:
@@ -281,8 +288,37 @@ def score_components(row: dict[str, str], config: DetectorConfig, use_raw: bool 
     pseudorange = max(pr_rms, pr_abs)
 
     raim_score = to_float(row, "raw_raim_score", 0.0)
-    reference = safe_ratio(to_float(row, "raw_reference_residual_rms_m", 0.0), config.reference_residual_scale_m)
+    reference = max(
+        to_float(row, "raw_reference_score", 0.0),
+        safe_ratio(to_float(row, "raw_reference_residual_rms_m", 0.0), config.reference_residual_scale_m),
+    )
     raw = max(raim_score, reference) if use_raw else 0.0
+    raw_available = to_float(row, "raw_raim_used_satellite_count", 0.0) > 0.0
+
+    raw_used = max(
+        to_float(row, "raw_raim_used_satellite_count", 0.0),
+        to_float(row, "raw_healthy_pr_count", 0.0),
+    )
+    raw_coverage = clamp((raw_used - 3.0) / 3.0, 0.0, 1.0) if raw_available else 0.0
+    raw_raim_residual = safe_ratio(to_float(row, "raw_raim_residual_rms_m", 0.0), config.pr_rms_scale_m)
+    raw_raim_abs = safe_ratio(to_float(row, "raw_raim_max_abs_m", 0.0), config.pr_abs_scale_m)
+    reference_residual = safe_ratio(to_float(row, "raw_reference_residual_rms_m", 0.0), config.reference_residual_scale_m * 0.65)
+    reference_abs = safe_ratio(to_float(row, "raw_reference_max_abs_m", 0.0), config.pr_abs_scale_m * 0.75)
+    observation_outlier_evidence = clamp(
+        (
+            to_float(row, "raw_pr_outlier_reject_count", 0.0)
+            + to_float(row, "raw_raim_outlier_count", 0.0)
+            + to_float(row, "raw_reference_outlier_count", 0.0)
+        )
+        / 2.0,
+        0.0,
+        1.5,
+    )
+    robust_raim = raw_coverage * (
+        0.50 * max(capped_score(raim_score, 2.5), 0.65 * capped_score(raw_raim_residual, 2.5) + 0.35 * capped_score(raw_raim_abs, 2.5))
+        + 0.40 * max(capped_score(reference, 2.5), 0.75 * capped_score(reference_residual, 2.5) + 0.25 * capped_score(reference_abs, 2.5))
+        + 0.10 * observation_outlier_evidence
+    )
 
     doppler = safe_ratio(to_float(row, "raw_doppler_rms_mps", 0.0), config.doppler_scale_mps)
     quality = 0.0
@@ -293,24 +329,37 @@ def score_components(row: dict[str, str], config: DetectorConfig, use_raw: bool 
     if rtk_ratio > 0.0:
         quality += clamp((3.0 - rtk_ratio) / 12.0, 0.0, 0.25)
 
-    raw_available = to_float(row, "raw_raim_used_satellite_count", 0.0) > 0.0
+    fused_lio = capped_score(lio, 6.0)
+    fused_pseudorange = capped_score(pseudorange, 3.0)
+    fused_raw = capped_score(raw, 3.0)
+    fused_doppler = capped_score(doppler, 3.0)
+    fused_quality = capped_score(quality, 1.0)
+    support_count = 0
+    support_count += 1 if lio >= 0.85 else 0
+    support_count += 1 if pseudorange >= 0.60 else 0
+    support_count += 1 if raw >= 0.55 else 0
+    support_count += 1 if doppler >= 0.75 else 0
+
     if use_raw and raw_available:
-        fused = 0.32 * lio + 0.25 * pseudorange + 0.23 * raw + 0.08 * doppler + 0.12 * quality
+        fused = 0.18 * fused_lio + 0.30 * fused_pseudorange + 0.30 * fused_raw + 0.10 * fused_doppler + 0.12 * fused_quality
     else:
         # Missing raw geometry should reduce confidence in LIO-only excursions.
-        fused = 0.24 * lio + 0.18 * pseudorange + 0.08 * doppler + 0.10 * quality
+        fused = 0.14 * fused_lio + 0.26 * fused_pseudorange + 0.10 * fused_doppler + 0.10 * fused_quality
     return {
         "score_lio": finite(lio),
         "score_residual": finite(residual),
         "score_maha": finite(maha),
         "score_pseudorange": finite(pseudorange),
+        "score_ekf_innovation": finite(maha),
         "score_pr_rms": finite(pr_rms),
         "score_pr_abs": finite(pr_abs),
         "score_raw": finite(raw),
         "score_raim": finite(raim_score),
+        "score_robust_raim": finite(robust_raim),
         "score_reference": finite(reference),
         "score_doppler": finite(doppler),
         "score_quality": finite(quality),
+        "score_support": float(support_count),
         "score_fused": finite(fused),
     }
 
@@ -319,8 +368,8 @@ def adaptive_threshold(row: dict[str, str], config: DetectorConfig, use_env: boo
     env = environment_degradation(row)
     if not use_env:
         return config.base_threshold, env
-    missing_raw_penalty = 0.35 if env["raw_raim_coverage"] < 0.5 else 0.0
-    threshold = config.base_threshold * (1.0 + config.adaptive_gain * env["environment_degradation"] + missing_raw_penalty)
+    missing_raw_penalty = 0.03 if env["raw_raim_coverage"] < 0.5 else 0.0
+    threshold = config.base_threshold * (1.0 + 0.25 * config.adaptive_gain * env["environment_degradation"] + missing_raw_penalty)
     return threshold, env
 
 
@@ -359,6 +408,20 @@ def run_detector(rows: list[dict[str, str]], detector: str, config: DetectorConf
             increment = max(0.0, score - threshold)
             confidence = sigmoid((score - threshold) * config.confidence_slope)
             cusum = 0.0
+        elif detector == "robust_raim":
+            score = components["score_robust_raim"]
+            threshold = 1.0
+            detected = 1 if score >= threshold else 0
+            increment = max(0.0, score - threshold)
+            confidence = sigmoid((score - threshold) * config.confidence_slope)
+            cusum = 0.0
+        elif detector == "ekf_innovation":
+            score = components["score_ekf_innovation"]
+            threshold = 1.0
+            detected = 1 if score >= threshold else 0
+            increment = max(0.0, score - threshold)
+            confidence = sigmoid((score - threshold) * config.confidence_slope)
+            cusum = 0.0
         elif detector == "pseudorange_glrt_only":
             score = components["score_pseudorange"]
             threshold = 1.0
@@ -380,6 +443,17 @@ def run_detector(rows: list[dict[str, str]], detector: str, config: DetectorConf
             increment = max(0.0, score - threshold)
             confidence = sigmoid((score - threshold) * config.confidence_slope)
             cusum = 0.0
+        elif detector == "fixed_cusum_fused":
+            score = components["score_fused"]
+            threshold = config.base_threshold
+            normalized = score / max(1e-9, threshold)
+            increment = max(0.0, normalized - 0.72 - config.cusum_drift)
+            if increment > 0.0:
+                cusum = max(0.0, cusum + increment)
+            else:
+                cusum = max(0.0, cusum - config.reset_leak)
+            detected = 1 if cusum >= config.cusum_threshold else 0
+            confidence = sigmoid((cusum / max(1e-9, config.cusum_threshold) - 0.72) * config.confidence_slope)
         elif detector in {"adaptive_fused", "adaptive_seq_no_cusum"}:
             score = components["score_fused"]
             detected = 1 if score >= threshold else 0
@@ -389,14 +463,21 @@ def run_detector(rows: list[dict[str, str]], detector: str, config: DetectorConf
         elif detector.startswith("adaptive_seq"):
             score = components["score_fused"]
             normalized = score / max(1e-9, threshold)
-            raw_increment = max(0.0, normalized - 0.72)
-            env_relief = 0.35 * env["environment_degradation"] if detector != "adaptive_seq_no_env" else 0.0
+            support = components["score_support"]
+            if support >= 2.0:
+                support_factor = 1.0
+            elif components["score_lio"] >= 3.0 and (components["score_pseudorange"] >= 0.45 or components["score_raw"] >= 0.35):
+                support_factor = 0.35
+            else:
+                support_factor = 0.0
+            raw_increment = max(0.0, normalized - 0.80) * support_factor
+            env_relief = 0.01 * env["environment_degradation"] if detector != "adaptive_seq_no_env" else 0.0
             increment = max(0.0, raw_increment - config.cusum_drift - env_relief)
             if increment > 0.0:
                 cusum = max(0.0, cusum + increment)
             else:
-                cusum = max(0.0, cusum - config.reset_leak * (1.0 + env["environment_degradation"]))
-            detected = 1 if cusum >= config.cusum_threshold else 0
+                cusum = max(0.0, cusum - config.reset_leak * (1.0 + 3.0 * env["environment_degradation"]))
+            detected = 1 if cusum >= config.cusum_threshold and support_factor > 0.0 and normalized >= 0.80 else 0
             confidence = sigmoid((cusum / max(1e-9, config.cusum_threshold) - 0.72) * config.confidence_slope)
         else:
             raise ValueError(f"Unknown detector: {detector}")
@@ -421,11 +502,14 @@ def run_detector(rows: list[dict[str, str]], detector: str, config: DetectorConf
                 "environment_degradation": f"{env['environment_degradation']:.9f}",
                 "score_lio": f"{components['score_lio']:.9f}",
                 "score_pseudorange": f"{components['score_pseudorange']:.9f}",
+                "score_ekf_innovation": f"{components['score_ekf_innovation']:.9f}",
                 "score_raw": f"{components['score_raw']:.9f}",
                 "score_raim": f"{components['score_raim']:.9f}",
+                "score_robust_raim": f"{components['score_robust_raim']:.9f}",
                 "score_reference": f"{components['score_reference']:.9f}",
                 "score_doppler": f"{components['score_doppler']:.9f}",
                 "score_quality": f"{components['score_quality']:.9f}",
+                "score_support": f"{components['score_support']:.0f}",
             }
         )
     metrics = evaluate_rows(out_rows)
@@ -455,11 +539,14 @@ def write_long_csv(path: Path, outputs: list[DetectorOutput]) -> None:
         "environment_degradation",
         "score_lio",
         "score_pseudorange",
+        "score_ekf_innovation",
         "score_raw",
         "score_raim",
+        "score_robust_raim",
         "score_reference",
         "score_doppler",
         "score_quality",
+        "score_support",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:

@@ -183,7 +183,7 @@ The repository now includes the first reproducible layer for a GNSS spoof-detect
 - `tools/extract_rinex_features.py` extracts RINEX per-satellite raw observation features and per-epoch summaries.
 - `tools/compute_raw_gnss_residuals.py` parses GPS broadcast ephemerides, computes raw pseudorange residuals, writes RAIM/reference residual summaries, and now emits Doppler/TDCP residual statistics with a multi-constellation observation framework.
 - `tools/inject_observation_attack.py` injects reproducible observation-level pseudorange attacks into per-satellite RINEX feature CSVs.
-- `tools/adaptive_sequential_detector.py` implements the Environment-Adaptive Sequential GLRT detector and the baseline/ablation detectors.
+- `tools/adaptive_sequential_detector.py` implements the Environment-Adaptive Sequential GLRT detector plus RAIM, robust RAIM, EKF innovation, pseudorange GLRT, LIO-GNSS, fixed fused, fixed CUSUM fused, adaptive fused, and ablation detectors.
 - `tools/run_experiment_matrix.py` generates clean, degraded non-attack, multi-strength, multi-ramp, multi-type spoofing experiments, baseline/ablation comparisons, attack-factor summaries, and parameter-sensitivity sweeps.
 - `tools/ml_baseline.py` implements a dependency-light RandomForest/XGBoost-style tree-ensemble classifier baseline.
 - `tools/route_split_experiments.py` runs train-route tuning, test-route evaluation, and optional ML-baseline comparisons across route CSVs.

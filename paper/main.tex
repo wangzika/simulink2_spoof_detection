@@ -47,7 +47,7 @@ The contributions are:
     \item an environment-adaptive sequential GLRT that jointly uses raw GNSS residuals, receiver pseudorange diagnostics, and LiDAR--inertial consistency;
     \item a GPS broadcast-ephemeris residual engine with weighted least-squares positioning, RAIM chi-square statistics, and RTK-reference pseudorange residuals;
     \item an observation-level pseudorange attack injector and an \MatrixScenarioCount{}-scenario experiment matrix covering clean, degraded, and synthetic spoofing cases;
-    \item reproducible comparisons against RAIM-only, pseudorange-GLRT-only, LiDAR--GNSS-only, fixed fused, adaptive non-sequential, and sensor-ablation baselines.
+    \item reproducible comparisons against RAIM-only, robust RAIM, EKF innovation, pseudorange-GLRT-only, LiDAR--GNSS-only, fixed fused, fixed CUSUM, adaptive non-sequential, and sensor-ablation baselines.
 \end{itemize}
 
 \section{Related Work}
@@ -146,7 +146,7 @@ Spoofing cases vary attack strength at 1, 2, 5, and 10 m; ramp time at 1, 5, 20,
 The degraded non-attack case lowers C/N0, worsens DOP, reduces RTK ratio and satellite availability, and increases moderate multipath-like pseudorange scatter without changing the spoofing label.
 This design tests whether a detector separates adversarial consistency violations from ordinary quality degradation.
 
-We compare EA-SGLRT with RAIM-only, pseudorange GLRT-only, LiDAR--GNSS residual-only, fixed-threshold fused detection, adaptive non-sequential fused detection, and ablations that remove raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM.
+We compare EA-SGLRT with RAIM-only, robust RAIM with reference-residual evidence, EKF innovation gating, pseudorange GLRT-only, LiDAR--GNSS residual-only, fixed-threshold fused detection, fixed-threshold CUSUM fusion, adaptive non-sequential fused detection, and ablations that remove raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM.
 Metrics are computed per scenario and then averaged over the \MatrixAttackScenarioCount{} spoofing scenarios; false alarms/min are computed from the clean and degraded non-attack scenarios.
 For statistical comparison, each synthetic attack scenario is treated as a paired trial between EA-SGLRT and the fixed fused detector.
 EA-SGLRT improves F1 by \AdaptiveVsFixedFoneGain{} on average, with bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}] and sign-test $p=\AdaptiveVsFixedPvalue{}$.
@@ -160,9 +160,12 @@ EA-SGLRT improves F1 by \AdaptiveVsFixedFoneGain{} on average, with bootstrap 95
 Detector & Prec. & Recall & F1 & FA/min \\
 \midrule
 RAIM & \RaimOnlyPrecision{} & \RaimOnlyRecall{} & \RaimOnlyFone{} & 0.000 \\
+Robust RAIM & \RobustRaimPrecision{} & \RobustRaimRecall{} & \RobustRaimFone{} & \RobustRaimFalseAlarm{} \\
+EKF innov. & \EkfInnovationPrecision{} & \EkfInnovationRecall{} & \EkfInnovationFone{} & \EkfInnovationFalseAlarm{} \\
 PR GLRT & \PseudorangeGlrtPrecision{} & \PseudorangeGlrtRecall{} & \PseudorangeGlrtFone{} & \PseudorangeGlrtFalseAlarm{} \\
 LIO--GNSS & \LioResidualPrecision{} & \LioResidualRecall{} & \LioResidualFone{} & \LioResidualFalseAlarm{} \\
 Fixed fused & \FixedFusedPrecision{} & \FixedFusedRecall{} & \FixedFusedMatrixFone{} & \FixedFusedMatrixFalseAlarm{} \\
+Fixed CUSUM & \FixedCusumFusedPrecision{} & \FixedCusumFusedRecall{} & \FixedCusumFusedFone{} & \FixedCusumFusedFalseAlarm{} \\
 Adaptive fused & \AdaptiveFusedPrecision{} & \AdaptiveFusedRecall{} & \AdaptiveFusedFone{} & \AdaptiveFusedFalseAlarm{} \\
 EA-SGLRT & \AdaptiveSeqPrecision{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFone{} & \AdaptiveSeqFalseAlarm{} \\
 \bottomrule
@@ -199,7 +202,7 @@ Across attack types, the best mean F1 is obtained for \AttackTypeBestName{} atta
 \subsection{Benign Degradation and Ablation}
 Fig.~\ref{fig:environment} directly tests the false-alarm failure mode that motivates the method.
 The fixed fused detector produces \FixedFusedDegradedFalseAlarm{} false alarms/min on degraded non-attack data, whereas EA-SGLRT reduces this to \AdaptiveSeqDegradedFalseAlarm{} false alarms/min by raising the threshold when C/N0, DOP, RTK ratio, and satellite availability indicate poor conditions.
-On clean data, the two fused detectors have comparable false-alarm rates (\FixedFusedCleanFalseAlarm{} and \AdaptiveSeqCleanFalseAlarm{} false alarms/min), showing that the main robustness gain comes from environment adaptation rather than simply suppressing all detections.
+On clean data, EA-SGLRT also lowers false alarms from \FixedFusedCleanFalseAlarm{} to \AdaptiveSeqCleanFalseAlarm{} alarms/min, showing that the robust cue weighting and sequential confirmation suppress single-cue innovation spikes rather than simply hiding degraded epochs.
 
 \begin{figure}[!t]
     \centering

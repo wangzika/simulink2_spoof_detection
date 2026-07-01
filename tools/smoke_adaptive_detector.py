@@ -87,11 +87,30 @@ def main() -> int:
     csv_path = root / "smoke_detection.csv"
     write_fixture(csv_path, rows)
 
-    outputs = detector.run_detectors(rows, ["fixed_fused", "adaptive_seq_full", "adaptive_seq_no_env"], detector.DetectorConfig(), scenario="smoke")
+    outputs = detector.run_detectors(
+        rows,
+        [
+            "robust_raim",
+            "ekf_innovation",
+            "fixed_fused",
+            "fixed_cusum_fused",
+            "adaptive_seq_full",
+            "adaptive_seq_no_env",
+        ],
+        detector.DetectorConfig(),
+        scenario="smoke",
+    )
     by_name = {output.detector: output.metrics for output in outputs}
+    robust_raim = by_name["robust_raim"]
+    ekf = by_name["ekf_innovation"]
+    fixed_cusum = by_name["fixed_cusum_fused"]
     adaptive = by_name["adaptive_seq_full"]
     fixed = by_name["fixed_fused"]
     no_env = by_name["adaptive_seq_no_env"]
+    if robust_raim["true_positive"] <= 0 or ekf["true_positive"] <= 0:
+        raise SystemExit(f"Expected robust RAIM and EKF baselines to detect attack, robust={robust_raim}, ekf={ekf}")
+    if fixed_cusum["recall"] <= 0.5:
+        raise SystemExit(f"Expected fixed CUSUM fused baseline to catch sustained attack, got {fixed_cusum}")
     if adaptive["true_positive"] <= 0 or adaptive["recall"] <= 0.5:
         raise SystemExit(f"Expected adaptive detector to catch sustained attack, got {adaptive}")
     if adaptive["false_positive"] > fixed["false_positive"]:
