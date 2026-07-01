@@ -235,6 +235,21 @@ python tools/rerun_viewer.py build/final_simulation.csv \
   --no-spawn
 ```
 
+论文攻击实验的 Rerun 入口使用 RTKLIB 完整时间轴，不再只显示 FAST_GLIO loose 的 217 个同步样本：
+
+```bash
+cmake --build build --target paper_rerun_record
+python tools/rerun_paper_attack_viewer.py \
+  build/paper_platform/full_data_attack_full_timeline/full_data_attack_full_timeline_detection.csv \
+  --timeline build/paper_platform/full_data_attack_full_timeline/full_data_attack_full_timeline_adaptive_seq.csv \
+  --satellite-features build/paper_platform/rinex_rover_attack/full_data_rover_attack_satellite_features.csv \
+  --attack-summary build/paper_platform/rinex_rover_attack/full_data_rover_attack_attack_summary.json \
+  --save build/paper_platform/paper_attack_visualization.rrd \
+  --no-spawn
+```
+
+该 `.rrd` 会显示完整 RTK 轨迹、攻击注入开始/结束、观测级 pseudorange 注入、固定分数首次报警、EA-SGLRT 首次报警、score/CUSUM/confidence 曲线和被攻击卫星 bias 曲线；事件文本会区分攻击窗口内检测和攻击窗口外报警。默认论文评估 CSV 仍以 FAST_GLIO 可同步窗口为准；完整可视化目标通过 `--base-timeline rtk` 覆盖整个 RTKLIB route。
+
 ## 5. 真实数据和论文平台
 
 ### 5.1 当前默认数据路径
@@ -579,6 +594,8 @@ cmake --build build --target raw_observation_attack
 cmake --build build --target raw_gnss_residuals_attack
 cmake --build build --target paper_dataset
 cmake --build build --target paper_dataset_attack
+cmake --build build --target paper_dataset_attack_full_timeline
+cmake --build build --target paper_adaptive_attack_full_timeline
 cmake --build build --target paper_eval_clean
 cmake --build build --target paper_eval_attack
 cmake --build build --target paper_pipeline
@@ -589,6 +606,8 @@ cmake --build build --target paper_figures
 cmake --build build --target paper_pdf
 cmake --build build --target rerun_view
 cmake --build build --target rerun_record
+cmake --build build --target paper_rerun_record
+cmake --build build --target paper_rerun_view
 ```
 
 最常用的一键复现论文：
@@ -646,6 +665,7 @@ environment_false_alarm.png
 ablation_comparison.png
 parameter_sensitivity.png
 adaptive_cusum_timeline.png
+visualization_experiment.png
 ```
 
 ## 10. 测试和验证
@@ -808,4 +828,3 @@ git add <changed-files>
 git commit -m "<message>"
 git push origin main
 ```
-

@@ -259,6 +259,78 @@ if (Python3_EXECUTABLE)
             COMMENT "Build a synthetic spoofing dataset for detector evaluation"
             VERBATIM
         )
+        set(PAPER_ATTACK_FULL_TIMELINE_DIR
+            "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/full_data_attack_full_timeline")
+        set(PAPER_ATTACK_FULL_TIMELINE_CSV
+            "${PAPER_ATTACK_FULL_TIMELINE_DIR}/full_data_attack_full_timeline_detection.csv")
+        set(PAPER_ATTACK_FULL_TIMELINE_ADAPTIVE_CSV
+            "${PAPER_ATTACK_FULL_TIMELINE_DIR}/full_data_attack_full_timeline_adaptive_seq.csv")
+        add_custom_target(paper_dataset_attack_full_timeline
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_detection_dataset.py
+                --rtklib-pos ${FULL_DATA_RTKLIB_POS}
+                --dop ${FULL_DATA_DOP}
+                --loose ${FAST_GLIO_LOOSE}
+                --raw ${FAST_GLIO_RAW}
+                --tight ${FAST_GLIO_TIGHT}
+                ${PAPER_RINEX_SUMMARY_ARGS}
+                ${PAPER_RAW_RESIDUAL_ATTACK_ARGS}
+                --name full_data_attack_full_timeline
+                --output-dir ${PAPER_ATTACK_FULL_TIMELINE_DIR}
+                --base-timeline rtk
+                --attack-window +180:+260
+                --attack-offset 8.0,-3.0,0.5
+                --pseudorange-delay 18.0
+            DEPENDS ${FULL_DATA_RTKLIB_POS_DEPS} ${PAPER_RINEX_DEPS} ${PAPER_RAW_RESIDUAL_ATTACK_DEPS}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Build a full RTKLIB-timeline spoofing dataset for visualization"
+            VERBATIM
+        )
+        add_custom_target(paper_adaptive_attack_full_timeline
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/adaptive_sequential_detector.py
+                ${PAPER_ATTACK_FULL_TIMELINE_CSV}
+                --detectors adaptive_seq_full
+                --scenario full_data_attack_full_timeline
+                --output-csv ${PAPER_ATTACK_FULL_TIMELINE_ADAPTIVE_CSV}
+                --metrics-json ${PAPER_ATTACK_FULL_TIMELINE_DIR}/full_data_attack_full_timeline_adaptive_seq_metrics.json
+                --metrics-md ${PAPER_ATTACK_FULL_TIMELINE_DIR}/full_data_attack_full_timeline_adaptive_seq_metrics.md
+            DEPENDS paper_dataset_attack_full_timeline
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Run EA-SGLRT on the full RTKLIB-timeline spoofing dataset"
+            VERBATIM
+        )
+        if (PAPER_RAW_RESIDUAL_ATTACK_DEPS)
+            set(PAPER_ATTACK_RERUN_RECORDING
+                "${CMAKE_CURRENT_BINARY_DIR}/paper_platform/paper_attack_visualization.rrd")
+            add_custom_target(paper_rerun_record
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/rerun_paper_attack_viewer.py
+                    ${PAPER_ATTACK_FULL_TIMELINE_CSV}
+                    --timeline ${PAPER_ATTACK_FULL_TIMELINE_ADAPTIVE_CSV}
+                    --satellite-features ${FULL_DATA_ATTACKED_SATELLITE_FEATURES}
+                    --attack-summary ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover_attack/full_data_rover_attack_attack_summary.json
+                    --save ${PAPER_ATTACK_RERUN_RECORDING}
+                    --no-spawn
+                DEPENDS paper_adaptive_attack_full_timeline raw_observation_attack
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Generate an offline Rerun recording for attack injection and detection visualization"
+                VERBATIM
+            )
+            add_custom_target(paper_rerun_view
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/rerun_paper_attack_viewer.py
+                    ${PAPER_ATTACK_FULL_TIMELINE_CSV}
+                    --timeline ${PAPER_ATTACK_FULL_TIMELINE_ADAPTIVE_CSV}
+                    --satellite-features ${FULL_DATA_ATTACKED_SATELLITE_FEATURES}
+                    --attack-summary ${CMAKE_CURRENT_BINARY_DIR}/paper_platform/rinex_rover_attack/full_data_rover_attack_attack_summary.json
+                    --save ${PAPER_ATTACK_RERUN_RECORDING}
+                DEPENDS paper_adaptive_attack_full_timeline raw_observation_attack
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Open the paper attack injection/detection dashboard in Rerun"
+                VERBATIM
+            )
+        endif()
         add_custom_target(paper_eval_attack
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/evaluate_detection.py
@@ -328,7 +400,7 @@ if (Python3_EXECUTABLE)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_paper_figures.py
                 --output-dir ${CMAKE_CURRENT_SOURCE_DIR}/paper/figures
                 --metrics-tex ${CMAKE_CURRENT_SOURCE_DIR}/paper/generated_metrics.tex
-            DEPENDS paper_pipeline adaptive_experiments
+            DEPENDS paper_pipeline adaptive_experiments paper_dataset_attack_full_timeline
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Generate LaTeX paper figures from experiment outputs"
             VERBATIM

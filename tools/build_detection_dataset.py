@@ -58,6 +58,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--origin", choices=["first", "first-fixed"], default="first-fixed")
     parser.add_argument("--max-delta-s", type=float, default=0.65, help="Nearest-neighbor log sync tolerance.")
     parser.add_argument(
+        "--base-timeline",
+        choices=["auto", "loose", "raw", "tight", "rtk", "dop", "rinex", "raw-residual"],
+        default="auto",
+        help=(
+            "Timeline used for output rows. 'auto' preserves the historical order "
+            "loose/raw/tight/rtk; choose 'rtk' for full RTKLIB-route visualization."
+        ),
+    )
+    parser.add_argument(
+        "--max-loose-residual-m",
+        type=float,
+        default=1000.0,
+        help="Drop matched FAST_GLIO loose rows with residual components/norm above this magnitude.",
+    )
+    parser.add_argument(
+        "--max-loose-maha",
+        type=float,
+        default=1.0e6,
+        help="Drop matched FAST_GLIO loose rows with Mahalanobis distance above this value.",
+    )
+    parser.add_argument(
+        "--disable-loose-sanity-filter",
+        action="store_true",
+        help="Keep all matched FAST_GLIO loose rows, including non-finite or obviously overflowed values.",
+    )
+    parser.add_argument(
         "--attack-window",
         action="append",
         default=[],
@@ -398,6 +424,46 @@ def base_stamps(*indexes: IndexedRows) -> list[float]:
     return []
 
 
+def select_base_timeline(choice: str, indexes: dict[str, IndexedRows]) -> tuple[str, list[float]]:
+    order = ["loose", "raw", "tight", "rtk", "dop", "rinex", "raw-residual"]
+    if choice != "auto":
+        indexed = indexes.get(choice)
+        if indexed is not None and indexed.rows:
+            return choice, indexed.stamps
+        available = ", ".join(name for name in order if indexes.get(name) and indexes[name].rows) or "none"
+        raise SystemExit(f"--base-timeline {choice} has no rows. Available timelines: {available}")
+
+    for name in order:
+        indexed = indexes.get(name)
+        if indexed is not None and indexed.rows:
+            return name, indexed.stamps
+    return "none", []
+
+
+def is_finite(value: float) -> bool:
+    return not math.isnan(value) and not math.isinf(value)
+
+
+def loose_row_is_valid(row: dict[str, str] | None, args: argparse.Namespace) -> bool:
+    if row is None or args.disable_loose_sanity_filter:
+        return row is not None
+    max_residual = max(0.0, float(args.max_loose_residual_m))
+    max_maha = max(0.0, float(args.max_loose_maha))
+    residual_x = parse_float(row, "residual_x", 0.0)
+    residual_y = parse_float(row, "residual_y", 0.0)
+    residual_z = parse_float(row, "residual_z", 0.0)
+    residual_norm = parse_float(row, "residual_norm", safe_norm(residual_x, residual_y, residual_z))
+    maha = parse_float(row, "maha", 0.0)
+    values = [residual_x, residual_y, residual_z, residual_norm, maha]
+    if any(not is_finite(value) for value in values):
+        return False
+    if max(abs(residual_x), abs(residual_y), abs(residual_z), abs(residual_norm)) > max_residual:
+        return False
+    if abs(maha) > max_maha:
+        return False
+    return True
+
+
 def fmt(value: float) -> str:
     if math.isnan(value) or math.isinf(value):
         return ""
@@ -417,9 +483,20 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
     rinex = read_indexed_csv(clean_path(args.rinex_summary))
     raw_residual = read_indexed_csv(clean_path(args.raw_residual_summary))
 
-    stamps = base_stamps(loose, raw, tight, rtk)
+    base_name, stamps = select_base_timeline(
+        args.base_timeline,
+        {
+            "loose": loose,
+            "raw": raw,
+            "tight": tight,
+            "rtk": rtk,
+            "dop": dop,
+            "rinex": rinex,
+            "raw-residual": raw_residual,
+        },
+    )
     if not stamps:
-        raise SystemExit("No input rows found. Provide at least one of --loose, --raw, --tight, or --rtklib-pos.")
+        raise SystemExit("No input rows found. Provide at least one of --loose, --raw, --tight, --rtklib-pos, --rinex-summary, or --raw-residual-summary.")
 
     first_stamp = stamps[0]
     windows = parse_windows(args.attack_window)
@@ -430,6 +507,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
     columns = [
         "stamp",
         "time_s",
+        "base_timeline",
         "attack_label",
         "attack_scale",
         "detected",
@@ -447,6 +525,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
         "loose_status_id",
         "loose_status_name",
         "loose_aligned",
+        "loose_valid",
         "loose_maha",
         "loose_gate_chi2",
         "loose_residual_x_m",
@@ -547,12 +626,19 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
     triggered_rows = 0
     detected_rows = 0
     consecutive = 0
+    invalid_loose_rows = 0
+    matched_loose_rows = 0
 
     with output_csv.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         for stamp in stamps:
             loose_row = nearest(loose, stamp, args.max_delta_s)
+            if loose_row is not None:
+                matched_loose_rows += 1
+                if not loose_row_is_valid(loose_row, args):
+                    invalid_loose_rows += 1
+                    loose_row = None
             raw_row = nearest(raw, stamp, args.max_delta_s)
             tight_row = nearest(tight, stamp, args.max_delta_s)
             rtk_row = nearest(rtk, stamp, args.max_delta_s)
@@ -611,6 +697,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
             output = {
                 "stamp": fmt(stamp),
                 "time_s": fmt(rel_t),
+                "base_timeline": base_name,
                 "attack_label": str(attack_label),
                 "attack_scale": fmt(scale),
                 "detected": str(detected),
@@ -628,6 +715,7 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
                 "loose_status_id": str(status_id(loose_status_name or (loose_row or {}).get("status", ""))),
                 "loose_status_name": loose_status_name,
                 "loose_aligned": str(parse_boolish(loose_row, "aligned")),
+                "loose_valid": "1" if loose_row is not None else "0",
                 "loose_maha": fmt(maha),
                 "loose_gate_chi2": fmt(row_values["loose_gate_chi2"]),
                 "loose_residual_x_m": fmt(residual_x),
@@ -738,6 +826,15 @@ def build_dataset(args: argparse.Namespace) -> tuple[Path, Path, dict[str, objec
         "threshold": args.threshold,
         "consecutive": args.consecutive,
         "max_delta_s": args.max_delta_s,
+        "base_timeline": base_name,
+        "selected_base_rows": len(stamps),
+        "matched_loose_rows": matched_loose_rows,
+        "invalid_loose_rows": invalid_loose_rows,
+        "loose_sanity_filter": {
+            "enabled": not args.disable_loose_sanity_filter,
+            "max_loose_residual_m": args.max_loose_residual_m,
+            "max_loose_maha": args.max_loose_maha,
+        },
         "inputs": {
             "loose_rows": len(loose.rows),
             "raw_rows": len(raw.rows),

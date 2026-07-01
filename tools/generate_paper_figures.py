@@ -27,6 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rinex-summary", default="build/paper_platform/rinex_rover/full_data_rover_rinex_summary.json")
     parser.add_argument("--rinex-epoch", default="build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv")
     parser.add_argument("--raw-clean-summary", default="build/paper_platform/raw_gnss_clean/full_data_raw_clean_raw_residual_summary.json")
+    parser.add_argument("--attack-summary", default="build/paper_platform/rinex_rover_attack/full_data_rover_attack_attack_summary.json")
+    parser.add_argument("--attack-detection-summary", default="build/paper_platform/full_data_attack/full_data_attack_detection_summary.json")
+    parser.add_argument("--full-timeline-summary", default="build/paper_platform/full_data_attack_full_timeline/full_data_attack_full_timeline_detection_summary.json")
     parser.add_argument("--rtklib-pos", default="../full_data/gnss/rtklib_full.pos")
     parser.add_argument("--adaptive-dir", default="build/paper_platform/adaptive_experiments")
     parser.add_argument("--output-dir", default="paper/figures")
@@ -47,6 +50,12 @@ def require(path: Path) -> Path:
     return path
 
 
+def load_optional_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def savefig(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
@@ -63,6 +72,9 @@ def load_inputs(args: argparse.Namespace):
     clean_metrics = json.loads(require(resolve(args.clean_metrics)).read_text(encoding="utf-8"))
     rinex_summary = json.loads(require(resolve(args.rinex_summary)).read_text(encoding="utf-8"))
     raw_clean_summary = json.loads(require(resolve(args.raw_clean_summary)).read_text(encoding="utf-8"))
+    attack_summary = load_optional_json(resolve(args.attack_summary))
+    attack_detection_summary = json.loads(require(resolve(args.attack_detection_summary)).read_text(encoding="utf-8"))
+    full_timeline_summary = load_optional_json(resolve(args.full_timeline_summary))
     rtklib_stats = summarize_rtklib_pos(require(resolve(args.rtklib_pos)))
     adaptive_dir = require(resolve(args.adaptive_dir))
     matrix = pd.read_csv(require(adaptive_dir / "matrix_results.csv"))
@@ -85,6 +97,9 @@ def load_inputs(args: argparse.Namespace):
         clean_metrics,
         rinex_summary,
         raw_clean_summary,
+        attack_summary,
+        attack_detection_summary,
+        full_timeline_summary,
         rtklib_stats,
         matrix,
         detector_summary,
@@ -304,6 +319,83 @@ def plot_method_flowchart(output_dir: Path) -> None:
     savefig(output_dir / "method_flowchart.png")
 
 
+def numeric(frame: pd.DataFrame, column: str, default: float = 0.0) -> pd.Series:
+    if column not in frame:
+        return pd.Series([default] * len(frame), index=frame.index)
+    return pd.to_numeric(frame[column], errors="coerce").fillna(default)
+
+
+def attack_intervals_from_frame(frame: pd.DataFrame, time_column: str = "time_s") -> list[tuple[float, float]]:
+    if frame.empty or "attack_label" not in frame:
+        return []
+    times = numeric(frame, time_column).to_numpy(dtype=float)
+    labels = numeric(frame, "attack_label").to_numpy(dtype=float) > 0.0
+    intervals: list[tuple[float, float]] = []
+    start: float | None = None
+    previous = float(times[0]) if len(times) else 0.0
+    for time_s, active in zip(times, labels):
+        if active and start is None:
+            start = float(time_s)
+        if start is not None and not active:
+            intervals.append((start, previous))
+            start = None
+        previous = float(time_s)
+    if start is not None:
+        intervals.append((start, previous))
+    return intervals
+
+
+def first_flag_time(frame: pd.DataFrame, flag: str, time_column: str = "time_s") -> float | None:
+    if frame.empty or flag not in frame:
+        return None
+    mask = numeric(frame, flag) > 0.0
+    if not bool(mask.any()):
+        return None
+    return float(numeric(frame, time_column)[mask].iloc[0])
+
+
+def annotate_attack_and_detection(ax, frame: pd.DataFrame, detection_flag: str = "detected", *, attack_label: str = "injection") -> None:
+    for idx, (start, end) in enumerate(attack_intervals_from_frame(frame)):
+        ax.axvline(start, color="#c92a2a", linestyle="--", linewidth=0.9, alpha=0.85, label="Injection start" if idx == 0 else None)
+        ax.axvline(end, color="#495057", linestyle=":", linewidth=0.9, alpha=0.8, label="Injection end" if idx == 0 else None)
+        ax.text(
+            start,
+            0.97,
+            f"{attack_label} +{start:.0f}s",
+            transform=ax.get_xaxis_transform(),
+            rotation=90,
+            va="top",
+            ha="right",
+            fontsize=7,
+            color="#7f1d1d",
+        )
+        ax.text(
+            end,
+            0.97,
+            f"end +{end:.0f}s",
+            transform=ax.get_xaxis_transform(),
+            rotation=90,
+            va="top",
+            ha="left",
+            fontsize=7,
+            color="#343a40",
+        )
+    first_detection = first_flag_time(frame, detection_flag)
+    if first_detection is not None:
+        ax.axvline(first_detection, color="#9c36b5", linestyle="-.", linewidth=0.9, alpha=0.85, label="First alarm")
+        ax.text(
+            first_detection,
+            0.74,
+            f"alarm +{first_detection:.0f}s",
+            transform=ax.get_xaxis_transform(),
+            rotation=90,
+            va="top",
+            ha="right",
+            fontsize=7,
+            color="#6f1d8f",
+        )
+
+
 def plot_trajectory_quality(attack: pd.DataFrame, output_dir: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(9.2, 3.8))
     ax = axes[0]
@@ -339,20 +431,22 @@ def plot_trajectory_quality(attack: pd.DataFrame, output_dir: Path) -> None:
 def plot_spoof_score(attack: pd.DataFrame, metrics: dict, output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(9.0, 3.8))
     t = attack["time_s"]
-    ax.plot(t, attack["spoof_score"], color="#364fc7", linewidth=1.3, label="Spoof score")
+    score = numeric(attack, "spoof_score")
+    ax.plot(t, score, color="#364fc7", linewidth=1.3, label="Spoof score")
     ax.axhline(float(attack["score_threshold"].iloc[0]), color="#d9480f", linestyle="--", label="Fixed threshold")
     best = metrics.get("threshold_sweep", {}).get("best_f1", {})
     if best:
         ax.axhline(float(best["threshold"]), color="#2b8a3e", linestyle=":", label="Best-F1 threshold")
     attack_mask = attack["attack_label"] > 0
     if attack_mask.any():
-        ax.fill_between(t, 0, attack["spoof_score"].max() * 1.08, where=attack_mask, color="#ffd43b", alpha=0.28, label="Injected attack")
+        ax.fill_between(t, 0, score.max() * 1.08, where=attack_mask, color="#ffd43b", alpha=0.28, label="Injected attack")
     det = attack["detected"] > 0
     if det.any():
-        ax.scatter(t[det], attack.loc[det, "spoof_score"], s=10, color="#c92a2a", label="Detected samples", zorder=3)
+        ax.scatter(t[det], score[det], s=10, color="#c92a2a", label="Detected samples", zorder=3)
+    annotate_attack_and_detection(ax, attack, attack_label="inject")
     ax.set_xlabel("Experiment time (s)")
     ax.set_ylabel("Score")
-    ax.set_title("Spoof-score timeline with synthetic attack")
+    ax.set_title("Spoof-score timeline with explicit injection markers")
     ax.legend(loc="upper right", fontsize=8)
     savefig(output_dir / "spoof_score_timeline.png")
 
@@ -392,6 +486,7 @@ def plot_raw_raim_timeline(attack: pd.DataFrame, output_dir: Path) -> None:
     det = pd.to_numeric(attack["raw_raim_detected"], errors="coerce").fillna(0) > 0
     if det.any():
         ax.scatter(t[det], raim_score[det], s=13, color="#c92a2a", label="RAIM detections", zorder=3)
+    annotate_attack_and_detection(ax, attack, detection_flag="raw_raim_detected", attack_label="inject")
     ax.set_xlabel("Experiment time (s)")
     ax.set_ylabel("RAIM score")
     ax2 = ax.twinx()
@@ -781,6 +876,7 @@ def plot_adaptive_cusum_timeline(timeline: pd.DataFrame, output_dir: Path) -> No
     for ax in axes:
         if attack.any():
             ax.fill_between(t, ax.get_ylim()[0], ax.get_ylim()[1], where=attack, color="#ffd43b", alpha=0.18)
+        annotate_attack_and_detection(ax, timeline, attack_label="inject")
         ax.grid(True, alpha=0.25)
     axes[0].set_title("Environment-adaptive sequential GLRT timeline")
     savefig(output_dir / "adaptive_cusum_timeline.png")
@@ -809,6 +905,11 @@ def plot_visualization_experiment(attack: pd.DataFrame, adaptive_timeline: pd.Da
     ax.plot(east, north, color="#495057", linewidth=1.1, label="RTK trajectory")
     if attack_mask.any():
         ax.scatter(east[attack_mask], north[attack_mask], s=18, color="#ffd43b", edgecolor="#e67700", linewidth=0.3, label="Attack window")
+        attack_indices = np.flatnonzero(attack_mask.to_numpy())
+        start_idx = int(attack_indices[0])
+        end_idx = int(attack_indices[-1])
+        ax.scatter([east.iloc[start_idx]], [north.iloc[start_idx]], s=70, marker="*", color="#c92a2a", edgecolor="#7f1d1d", linewidth=0.4, label=f"Inject +{t.iloc[start_idx]:.0f}s")
+        ax.scatter([east.iloc[end_idx]], [north.iloc[end_idx]], s=45, marker="D", color="#495057", edgecolor="#212529", linewidth=0.4, label=f"End +{t.iloc[end_idx]:.0f}s")
     if detected.any():
         ax.scatter(east[detected], north[detected], s=24, color="#c92a2a", marker="x", label="EA-SGLRT detection")
     ax.scatter([east.iloc[0]], [north.iloc[0]], marker="o", s=32, color="#2b8a3e", label="Start")
@@ -835,6 +936,7 @@ def plot_visualization_experiment(attack: pd.DataFrame, adaptive_timeline: pd.Da
     ax.plot(t, clipped_score("adaptive_threshold"), color="#212529", linestyle="--", linewidth=1.0, label="Adaptive threshold")
     if attack_mask.any():
         ax.fill_between(t, 0, 6.3, where=attack_mask, color="#ffd43b", alpha=0.18)
+    annotate_attack_and_detection(ax, timeline, attack_label="inject")
     ax.set_title("Multi-cue evidence")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Score (clipped at 6)")
@@ -852,6 +954,7 @@ def plot_visualization_experiment(attack: pd.DataFrame, adaptive_timeline: pd.Da
         ax.fill_between(t, 0, max(1.0, float(cusum.max()) * 1.15), where=attack_mask, color="#ffd43b", alpha=0.18)
     if detected.any():
         ax.scatter(t[detected], cusum[detected], s=18, color="#c92a2a", label="Detections", zorder=3)
+    annotate_attack_and_detection(ax, timeline, attack_label="inject")
     ax.set_title("Sequential decision state")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("CUSUM")
@@ -875,13 +978,14 @@ def plot_visualization_experiment(attack: pd.DataFrame, adaptive_timeline: pd.Da
     ax2.set_ylabel("C/N0 (dB-Hz) / satellites")
     if attack_mask.any():
         ax.fill_between(t, 0, ax.get_ylim()[1], where=attack_mask, color="#ffd43b", alpha=0.18)
+    annotate_attack_and_detection(ax, timeline, attack_label="inject")
     ax.set_title("Environment and raw-observation quality")
     lines, labels = ax.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax.legend(lines + lines2, labels + labels2, loc="upper right", fontsize=7)
     ax.grid(True, alpha=0.25)
 
-    fig.suptitle("Visualization experiment for representative coordinated spoofing", y=1.01, fontsize=10)
+    fig.suptitle("Visualization experiment with explicit attack injection and detection markers", y=1.01, fontsize=10)
     savefig(output_dir / "visualization_experiment.png")
 
 
@@ -896,6 +1000,9 @@ def write_metrics_tex(
     clean_metrics: dict,
     rinex_summary: dict,
     raw_clean_summary: dict,
+    attack_summary: dict,
+    attack_detection_summary: dict,
+    full_timeline_summary: dict,
     rtklib_stats: dict,
     detector_summary: pd.DataFrame,
     scenario_summary: pd.DataFrame,
@@ -978,6 +1085,14 @@ def write_metrics_tex(
     raw_written_epochs = int(raw_clean_summary.get("epochs_written", 0))
     raw_satellite_rows = int(raw_clean_summary.get("satellite_rows_written", 0))
     raw_coverage_percent = 100.0 * raw_written_epochs / raw_input_epochs if raw_input_epochs else 0.0
+    obs_windows = attack_summary.get("windows", []) if isinstance(attack_summary, dict) else []
+    first_obs_window = obs_windows[0] if obs_windows else {}
+    obs_attack_start = float(first_obs_window.get("start_s", 0.0)) if isinstance(first_obs_window, dict) else 0.0
+    obs_attack_end = float(first_obs_window.get("end_s", 0.0)) if isinstance(first_obs_window, dict) else 0.0
+    detection_base_timeline = str(attack_detection_summary.get("base_timeline", attack.get("base_timeline", pd.Series(["auto"])).iloc[0]))
+    full_timeline_rows = int(full_timeline_summary.get("rows", 0)) if isinstance(full_timeline_summary, dict) else 0
+    full_timeline_duration = float(full_timeline_summary.get("duration_s", 0.0)) if isinstance(full_timeline_summary, dict) else 0.0
+    full_timeline_base = str(full_timeline_summary.get("base_timeline", "n/a")) if isinstance(full_timeline_summary, dict) else "n/a"
     system_names = {"G": "GPS", "E": "Galileo", "C": "BeiDou", "R": "GLONASS", "J": "QZSS", "I": "IRNSS"}
     preferred_system_order = ["G", "E", "C", "R", "J", "I"]
     available_systems = set(raw_clean_summary.get("systems", []))
@@ -1015,6 +1130,19 @@ def write_metrics_tex(
         macro("RawResidualSatelliteRows", f"{raw_satellite_rows}"),
         macro("RawResidualCoveragePercent", f"{raw_coverage_percent:.1f}"),
         macro("RawResidualSystems", raw_systems or "n/a"),
+        macro("DetectionBaseTimeline", detection_base_timeline),
+        macro("DetectionInvalidLooseRows", f"{int(attack_detection_summary.get('invalid_loose_rows', 0))}"),
+        macro("DetectionMatchedLooseRows", f"{int(attack_detection_summary.get('matched_loose_rows', 0))}"),
+        macro("FullTimelineDetectionRows", f"{full_timeline_rows}"),
+        macro("FullTimelineBaseTimeline", full_timeline_base),
+        macro("FullTimelineDuration", f"{full_timeline_duration:.1f}"),
+        macro("ObservationAttackStart", f"{obs_attack_start:.0f}"),
+        macro("ObservationAttackEnd", f"{obs_attack_end:.0f}"),
+        macro("ObservationAttackCommonDelay", f"{float(attack_summary.get('common_delay_m', 0.0)):.1f}"),
+        macro("ObservationAttackPerSatelliteBias", f"{float(attack_summary.get('per_satellite_bias_m', 0.0)):.1f}"),
+        macro("ObservationAttackRows", f"{int(attack_summary.get('attacked_rows', 0))}"),
+        macro("ObservationAttackEpochs", f"{int(attack_summary.get('attacked_epochs', 0))}"),
+        macro("ObservationAttackMaxBias", f"{float(attack_summary.get('max_abs_bias_m', 0.0)):.1f}"),
         macro("BroadcastEphemerisSatellites", f"{int(raw_clean_summary.get('broadcast_ephemeris_satellites', 0))}"),
         macro("BroadcastGpsSatellites", f"{int(broadcast_by_system.get('G', 0))}"),
         macro("BroadcastGalileoSatellites", f"{int(broadcast_by_system.get('E', 0))}"),
@@ -1127,6 +1255,9 @@ def main() -> int:
         clean_metrics,
         rinex_summary,
         raw_clean_summary,
+        attack_summary,
+        attack_detection_summary,
+        full_timeline_summary,
         rtklib_stats,
         matrix,
         detector_summary,
@@ -1169,6 +1300,9 @@ def main() -> int:
         clean_metrics,
         rinex_summary,
         raw_clean_summary,
+        attack_summary,
+        attack_detection_summary,
+        full_timeline_summary,
         rtklib_stats,
         detector_summary,
         scenario_summary,

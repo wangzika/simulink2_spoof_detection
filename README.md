@@ -202,7 +202,7 @@ Run the current full-data paper pipeline when `../full_data/gnss` and FAST_GLIO 
 cmake --build build --target paper_pipeline
 ```
 
-Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_eval_clean`, `paper_eval_attack`, `adaptive_experiments`, `route_split_experiments`, and `configured_route_experiments`.
+Individual targets are also available: `rinex_features`, `raw_gnss_residuals`, `raw_observation_attack`, `raw_gnss_residuals_attack`, `paper_dataset`, `paper_dataset_attack`, `paper_dataset_attack_full_timeline`, `paper_adaptive_attack_full_timeline`, `paper_rerun_record`, `paper_rerun_view`, `paper_eval_clean`, `paper_eval_attack`, `adaptive_experiments`, `route_split_experiments`, and `configured_route_experiments`.
 
 Generate the LaTeX figures and PDF draft:
 
@@ -435,6 +435,21 @@ cmake --build build --target rerun_record
 python tools/rerun_viewer.py build/final_simulation.csv --save build/final_simulation.rrd --no-spawn
 PYTHONPATH=third_party/python_deps:third_party/python_deps/rerun_sdk python -m rerun_cli build/final_simulation.rrd
 ```
+
+For the paper attack experiment, build a full RTKLIB-timeline Rerun recording:
+
+```bash
+cmake --build build --target paper_rerun_record
+python tools/rerun_paper_attack_viewer.py \
+  build/paper_platform/full_data_attack_full_timeline/full_data_attack_full_timeline_detection.csv \
+  --timeline build/paper_platform/full_data_attack_full_timeline/full_data_attack_full_timeline_adaptive_seq.csv \
+  --satellite-features build/paper_platform/rinex_rover_attack/full_data_rover_attack_satellite_features.csv \
+  --attack-summary build/paper_platform/rinex_rover_attack/full_data_rover_attack_attack_summary.json \
+  --save build/paper_platform/paper_attack_visualization.rrd \
+  --no-spawn
+```
+
+This recording explicitly logs attack start/end, observation-level pseudorange injection, first fixed-score alarm, first EA-SGLRT alarm, the full RTK trajectory, score timelines, CUSUM/confidence, and injected satellite-bias plots. Event text distinguishes attack-window detections from alarms outside the attack window. The standard paper-evaluation CSV is intentionally synchronized to the shorter FAST_GLIO-compatible timeline; the full-timeline target uses `--base-timeline rtk` so visualization covers the complete RTKLIB route.
 
 ## CLI Options
 

@@ -98,6 +98,9 @@ cmake --build build --target raw_observation_attack
 cmake --build build --target raw_gnss_residuals_attack
 cmake --build build --target paper_dataset
 cmake --build build --target paper_dataset_attack
+cmake --build build --target paper_dataset_attack_full_timeline
+cmake --build build --target paper_adaptive_attack_full_timeline
+cmake --build build --target paper_rerun_record
 cmake --build build --target paper_eval_attack
 cmake --build build --target paper_eval_clean
 cmake --build build --target paper_pipeline
@@ -158,10 +161,11 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 
 验收标准：
 
-- 当前矩阵中 EA-SGLRT 在 82 场景上取得 mean attack F1 高于 fixed fused，同时 mean false alarms/min 更低。
+- 当前矩阵中 EA-SGLRT 在 82 场景上取得 mean attack F1 高于 fixed fused；误报方面应作为 non-dominated F1/false-alarm trade-off 解读，而不是已经完成低误报标定。
 - 已包含固定阈值、固定 CUSUM、RAIM-only、robust RAIM、EKF innovation、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
 - 已补充 attack type/strength/ramp breakdown、clean/degraded false-alarm breakdown、参数敏感性和 paired bootstrap/sign-test。
 - 已新增 route-held-out 实验入口、配置化 route registry 和 ML tree-ensemble optional baseline。
+- 已新增 RTKLIB 完整时间轴检测/可视化目标；默认评估 CSV 仍按 FAST_GLIO 同步窗口统计，Rerun `.rrd` 用完整 RTK 轨迹展示攻击注入、观测级 bias、首次报警和 score/CUSUM/confidence，并区分攻击窗口内检测与攻击窗口外报警。
 - 下一步要把 degraded non-attack 从合成降质扩展为真实 urban/open-sky 分段，并用不同 route 做真正 held-out 结论。
 
 ## Phase 4: 论文实验矩阵
