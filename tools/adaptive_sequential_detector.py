@@ -13,6 +13,7 @@ from typing import Iterable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+REFERENCE_ADAPTIVE_GAIN = 1.35
 
 
 @dataclass
@@ -28,6 +29,13 @@ class DetectorConfig:
     cusum_drift: float = 0.10
     reset_leak: float = 0.035
     confidence_slope: float = 2.6
+    consistency_pr_gate: float = 0.80
+    consistency_raw_gate: float = 0.55
+    consistency_lio_gate: float = 1.80
+    consistency_margin: float = 0.05
+    consistency_env_penalty: float = 0.15
+    consistency_cusum_drift: float = 0.04
+    consistency_reset_leak: float = 0.12
 
 
 @dataclass
@@ -72,6 +80,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cusum-threshold", type=float, default=DetectorConfig.cusum_threshold)
     parser.add_argument("--cusum-drift", type=float, default=DetectorConfig.cusum_drift)
     parser.add_argument("--reset-leak", type=float, default=DetectorConfig.reset_leak)
+    parser.add_argument("--consistency-pr-gate", type=float, default=DetectorConfig.consistency_pr_gate)
+    parser.add_argument("--consistency-raw-gate", type=float, default=DetectorConfig.consistency_raw_gate)
+    parser.add_argument("--consistency-lio-gate", type=float, default=DetectorConfig.consistency_lio_gate)
+    parser.add_argument("--consistency-margin", type=float, default=DetectorConfig.consistency_margin)
+    parser.add_argument("--consistency-env-penalty", type=float, default=DetectorConfig.consistency_env_penalty)
+    parser.add_argument("--consistency-cusum-drift", type=float, default=DetectorConfig.consistency_cusum_drift)
+    parser.add_argument("--consistency-reset-leak", type=float, default=DetectorConfig.consistency_reset_leak)
     return parser.parse_args()
 
 
@@ -373,6 +388,60 @@ def adaptive_threshold(row: dict[str, str], config: DetectorConfig, use_env: boo
     return threshold, env
 
 
+def consistency_evidence(
+    components: dict[str, float],
+    env: dict[str, float],
+    config: DetectorConfig,
+    *,
+    use_raw: bool = True,
+    use_lio: bool = True,
+    use_env: bool = True,
+) -> tuple[float, dict[str, float]]:
+    """Evidence that multiple residual families agree on spoofing rather than benign degradation."""
+    pr = components["score_pseudorange"]
+    raw = components["score_raw"] if use_raw else 0.0
+    lio = components["score_lio"] if use_lio else 0.0
+    doppler = components["score_doppler"]
+    quality = components["score_quality"]
+
+    pr_gate = max(1e-9, config.consistency_pr_gate)
+    raw_gate = max(1e-9, config.consistency_raw_gate)
+    lio_gate = max(1e-9, config.consistency_lio_gate)
+
+    observation_pair = max(0.0, min(pr / pr_gate, raw / raw_gate) - 1.0)
+    lio_pr_pair = max(0.0, min(lio / lio_gate, pr / pr_gate) - 1.0) if use_lio else 0.0
+    single_satellite_pair = max(0.0, min(pr / 2.2, raw / 1.25) - 1.0) if use_raw else 0.0
+
+    gated_weighted = 0.0
+    has_consistent_support = (
+        (use_raw and pr >= pr_gate and raw >= raw_gate)
+        or (use_lio and pr >= pr_gate and lio >= lio_gate)
+        or (use_raw and pr >= 2.2 and raw >= 1.1)
+    )
+    if has_consistent_support:
+        gated_weighted = (
+            0.55 * max(0.0, pr - pr_gate)
+            + 0.35 * max(0.0, raw - raw_gate)
+            + 0.10 * max(0.0, lio - lio_gate) / lio_gate
+        )
+
+    consistency = max(observation_pair, 0.75 * lio_pr_pair, single_satellite_pair, gated_weighted)
+    env_scale = config.adaptive_gain / max(1e-9, REFERENCE_ADAPTIVE_GAIN)
+    env_penalty = config.consistency_env_penalty * env_scale * env["environment_degradation"] if use_env else 0.0
+    quality_penalty = 0.03 * quality
+    doppler_bonus = 0.04 * max(0.0, doppler - 0.75)
+    score = max(0.0, consistency + doppler_bonus - env_penalty - quality_penalty)
+    return score, {
+        "observation_pair": observation_pair,
+        "lio_pr_pair": lio_pr_pair,
+        "single_satellite_pair": single_satellite_pair,
+        "gated_weighted": gated_weighted,
+        "consistency": consistency,
+        "env_penalty": env_penalty,
+        "quality_penalty": quality_penalty,
+    }
+
+
 def classify_attack(components: dict[str, float], env: dict[str, float], detected: int) -> str:
     if not detected:
         if env["environment_degradation"] >= 0.45:
@@ -454,30 +523,42 @@ def run_detector(rows: list[dict[str, str]], detector: str, config: DetectorConf
                 cusum = max(0.0, cusum - config.reset_leak)
             detected = 1 if cusum >= config.cusum_threshold else 0
             confidence = sigmoid((cusum / max(1e-9, config.cusum_threshold) - 0.72) * config.confidence_slope)
-        elif detector in {"adaptive_fused", "adaptive_seq_no_cusum"}:
+        elif detector == "adaptive_fused":
             score = components["score_fused"]
             detected = 1 if score >= threshold else 0
             increment = max(0.0, score / max(1e-9, threshold) - 1.0)
             confidence = sigmoid((score / max(1e-9, threshold) - 1.0) * config.confidence_slope)
             cusum = 0.0
+        elif detector == "adaptive_seq_no_cusum":
+            score, consistency = consistency_evidence(
+                components,
+                env,
+                config,
+                use_raw=use_raw,
+                use_lio=use_lio,
+                use_env=detector != "adaptive_seq_no_env",
+            )
+            threshold = config.consistency_margin + config.consistency_cusum_drift
+            increment = max(0.0, score - threshold)
+            detected = 1 if score >= threshold and consistency["consistency"] > config.consistency_margin else 0
+            confidence = sigmoid((score - threshold) * config.confidence_slope)
+            cusum = 0.0
         elif detector.startswith("adaptive_seq"):
-            score = components["score_fused"]
-            normalized = score / max(1e-9, threshold)
-            support = components["score_support"]
-            if support >= 2.0:
-                support_factor = 1.0
-            elif components["score_lio"] >= 3.0 and (components["score_pseudorange"] >= 0.45 or components["score_raw"] >= 0.35):
-                support_factor = 0.35
-            else:
-                support_factor = 0.0
-            raw_increment = max(0.0, normalized - 0.80) * support_factor
-            env_relief = 0.01 * env["environment_degradation"] if detector != "adaptive_seq_no_env" else 0.0
-            increment = max(0.0, raw_increment - config.cusum_drift - env_relief)
+            score, consistency = consistency_evidence(
+                components,
+                env,
+                config,
+                use_raw=use_raw,
+                use_lio=use_lio,
+                use_env=detector != "adaptive_seq_no_env",
+            )
+            threshold = config.consistency_margin + config.consistency_cusum_drift
+            increment = max(0.0, score - threshold)
             if increment > 0.0:
                 cusum = max(0.0, cusum + increment)
             else:
-                cusum = max(0.0, cusum - config.reset_leak * (1.0 + 3.0 * env["environment_degradation"]))
-            detected = 1 if cusum >= config.cusum_threshold and support_factor > 0.0 and normalized >= 0.80 else 0
+                cusum = max(0.0, cusum - config.consistency_reset_leak * (1.0 + 2.5 * env["environment_degradation"]))
+            detected = 1 if cusum >= config.cusum_threshold and consistency["consistency"] > config.consistency_margin else 0
             confidence = sigmoid((cusum / max(1e-9, config.cusum_threshold) - 0.72) * config.confidence_slope)
         else:
             raise ValueError(f"Unknown detector: {detector}")
@@ -593,6 +674,13 @@ def config_from_args(args: argparse.Namespace) -> DetectorConfig:
         cusum_threshold=args.cusum_threshold,
         cusum_drift=args.cusum_drift,
         reset_leak=args.reset_leak,
+        consistency_pr_gate=args.consistency_pr_gate,
+        consistency_raw_gate=args.consistency_raw_gate,
+        consistency_lio_gate=args.consistency_lio_gate,
+        consistency_margin=args.consistency_margin,
+        consistency_env_penalty=args.consistency_env_penalty,
+        consistency_cusum_drift=args.consistency_cusum_drift,
+        consistency_reset_leak=args.consistency_reset_leak,
     )
 
 

@@ -161,7 +161,7 @@ LaTeX 论文源文件在 `paper/main.tex`，实验图在 `paper/figures/`，编�
 
 验收标准：
 
-- 当前矩阵中 EA-SGLRT 在 82 场景上取得 mean attack F1 高于 fixed fused；误报方面应作为 non-dominated F1/false-alarm trade-off 解读，而不是已经完成低误报标定。
+- 当前矩阵中 EA-SGLRT 已切换为低误报一致性门控工作点：mean false alarm 从 fixed fused 的约 17.8/min 降到约 3.0/min，precision 提升到约 0.67，但 recall/F1 低于 fixed fused 和 LIO-only。论文应按 false-alarm-constrained Pareto trade-off 解读，而不是宣称绝对最高 F1。
 - 已包含固定阈值、固定 CUSUM、RAIM-only、robust RAIM、EKF innovation、pseudorange GLRT-only、LIO-GNSS-only、adaptive fused、EA-SGLRT 和四个消融。
 - 已补充 attack type/strength/ramp breakdown、clean/degraded false-alarm breakdown、参数敏感性和 paired bootstrap/sign-test。
 - 已新增 route-held-out 实验入口、配置化 route registry 和 ML tree-ensemble optional baseline。

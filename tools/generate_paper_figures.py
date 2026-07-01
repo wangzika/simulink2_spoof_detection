@@ -273,21 +273,21 @@ def plot_method_flowchart(output_dir: Path) -> None:
     # Outer anti-spoofing model frame.
     outer = Rectangle((0.45, 0.30), 9.10, 4.45, linewidth=1.25, edgecolor="#ff00ff", facecolor="none", linestyle=(0, (5, 3)))
     ax.add_patch(outer)
-    ax.text(5.00, 4.45, "EA-SGLRT anti-spoofing model design", ha="center", va="center", fontsize=10.5, fontweight="bold")
+    ax.text(5.00, 4.45, "Consistency-gated EA-SGLRT anti-spoofing model", ha="center", va="center", fontsize=10.5, fontweight="bold")
 
     # Measurement residual monitoring layer.
     rect(0.95, 2.85, 8.10, 1.35, "", edge="#dff0d5", face="#dff0d5", lw=0.0)
-    ax.text(3.0, 2.98, "Measurement residual monitoring", ha="center", va="center", fontsize=8.6, fontweight="bold")
+    ax.text(3.18, 2.98, "Raw/receiver residual consistency", ha="center", va="center", fontsize=8.6, fontweight="bold")
     ax.text(0.98, 3.42, "$R_{GNSS}$\n$P_{k|k-1}$", ha="left", va="center", fontsize=7.4, fontweight="bold")
     arrow((1.45, 3.42), (1.85, 3.42), lw=1.25)
-    rect(1.85, 3.10, 1.42, 0.65, "Trace\noperation", edge="#94d2ff", face="#f8fff4", fs=8.0)
+    rect(1.85, 3.10, 1.42, 0.65, "Residual\nformation", edge="#94d2ff", face="#f8fff4", fs=8.0)
     arrow((3.27, 3.42), (4.02, 3.42), lw=1.25)
     ax.text(3.48, 3.68, "$S_R,S_P$", fontsize=7.2)
-    diamond(4.50, 3.42, 1.10, 0.78, "Innovation\nmismatch?")
+    diamond(4.50, 3.42, 1.10, 0.78, "Multi-cue\nconsistent?")
     ax.text(4.13, 3.78, "No", fontsize=7.2, fontweight="bold")
     arrow((5.05, 3.42), (5.62, 3.42), lw=1.25)
     ax.text(5.12, 3.62, "Yes", fontsize=7.2, fontweight="bold")
-    rect(5.62, 3.10, 2.35, 0.68, "Decrease GNSS's\ncredibility", edge="#ff0000", face="#ffffff", fs=8.0)
+    rect(5.62, 3.10, 2.35, 0.68, "Build spoofing\nconsistency evidence", edge="#ff0000", face="#ffffff", fs=8.0)
     ax.text(8.12, 3.95, "$\\tilde{R}_{GNSS}$", fontsize=7.5, fontweight="bold")
     arrow((7.97, 3.42), (8.85, 3.42), lw=1.25)
     arrow((8.85, 3.42), (8.85, 4.93), lw=1.25)
@@ -295,8 +295,8 @@ def plot_method_flowchart(output_dir: Path) -> None:
 
     # Sequential confirmation layer.
     rect(0.95, 0.75, 8.10, 1.45, "", edge="#fff2c7", face="#fff2c7", lw=0.0)
-    ax.text(3.15, 0.98, "Environment-adaptive sequential confirmation", ha="center", va="center", fontsize=8.5, fontweight="bold")
-    ax.text(0.98, 1.45, "$E_t, q_t$\n$C_{k-1}$", ha="left", va="center", fontsize=7.4, fontweight="bold")
+    ax.text(3.25, 0.98, "Environment-adaptive CUSUM confirmation", ha="center", va="center", fontsize=8.5, fontweight="bold")
+    ax.text(0.98, 1.45, "$E_t, B_t$\n$C_{k-1}$", ha="left", va="center", fontsize=7.4, fontweight="bold")
     arrow((1.45, 1.45), (1.72, 1.45), lw=1.25)
     rect(1.72, 1.18, 1.22, 0.60, "Environment\nindex", edge="#94d2ff", face="#fffaf0", fs=7.6)
     arrow((2.94, 1.45), (3.52, 1.45), lw=1.25)
@@ -304,7 +304,7 @@ def plot_method_flowchart(output_dir: Path) -> None:
     arrow((5.22, 1.45), (5.88, 1.45), lw=1.25)
     rect(5.88, 1.18, 1.60, 0.60, "CUSUM\naccumulation", edge="#94d2ff", face="#fffaf0", fs=7.6)
     arrow((7.48, 1.45), (7.90, 1.45), lw=1.25)
-    rect(7.90, 1.08, 1.02, 0.78, "Increase\nalarm\ncredibility", edge="#ff0000", face="#ffffff", fs=7.1)
+    rect(7.90, 1.08, 1.02, 0.78, "Report\nalarm\nconfidence", edge="#ff0000", face="#ffffff", fs=7.1)
     arrow((4.50, 3.03), (4.50, 2.20), color="#0074d9", lw=1.5, mutation=12)
     arrow((4.50, 2.20), (6.68, 2.20), color="#0074d9", lw=1.5, mutation=12)
     arrow((6.68, 2.20), (6.68, 1.78), color="#0074d9", lw=1.5, mutation=12)
@@ -315,7 +315,7 @@ def plot_method_flowchart(output_dir: Path) -> None:
     arrow((9.35, 5.12), (7.70, 5.12), lw=1.25)
     arrow((0.45, 4.00), (3.05, 4.98), lw=1.35)
     ax.text(7.98, 1.95, "$\\tilde{P}_{k|k-1}$", fontsize=7.2, fontweight="bold")
-    ax.text(5.40, 1.70, "$\\Lambda_t$", fontsize=7.2, fontweight="bold")
+    ax.text(5.40, 1.70, "$\\bar{G}_t$", fontsize=7.2, fontweight="bold")
     savefig(output_dir / "method_flowchart.png")
 
 

@@ -473,7 +473,7 @@ EA-SGLRT 使用：
 - CUSUM-style sequential confirmation；
 - confidence 和 attack type 输出。
 
-当前论文叙述重点不是让 EA-SGLRT 取得最高单点 F1，而是在低误报工作点下保持可用检测性能。最新实验中 EA-SGLRT 是 F1/false-alarm Pareto frontier 上的 non-dominated operating point。
+当前论文叙述重点不是让 EA-SGLRT 取得最高单点 F1，而是在低误报工作点下保持可用检测性能。最新实现从“残差加权累积”改为“raw pseudorange/receiver diagnostic/LIO-GNSS 多证据一致性门控 + 环境惩罚 + CUSUM”，将 mean false alarm 压到约 3.0/min；代价是 recall/F1 下降，因此应作为 F1/false-alarm Pareto frontier 上的 non-dominated operating point 来写。
 
 ## 7. 实验矩阵
 
