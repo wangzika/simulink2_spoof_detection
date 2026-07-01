@@ -1,5 +1,7 @@
 # C++ F7 Flight Simulation
 
+中文总览和操作手册见 [docs/project_architecture_and_usage.md](docs/project_architecture_and_usage.md)。该文档按当前项目状态整理了整体架构、数据流、C++ 仿真、ImGui/Rerun 可视化、真实数据适配、论文实验矩阵、route-split、LaTeX 论文生成和投稿前限制。
+
 This is a standalone C++17 migration prototype for the MATLAB/Simulink GPS attack project. It rebuilds the main closed-loop structure in native C++:
 
 - trajectory planning
