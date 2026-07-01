@@ -26,6 +26,7 @@ This paper proposes an environment-adaptive sequential generalized likelihood ra
 The detector accumulates multi-cue evidence with a CUSUM-style statistic and outputs confidence and anomaly type.
 On a reproducible \MatrixScenarioCount{}-scenario matrix built from a real rover dataset, including clean data, degraded non-attack data, and \MatrixAttackScenarioCount{} synthetic spoofing cases, EA-SGLRT improves mean attack F1 to \AdaptiveSeqFone{} versus \FixedFusedMatrixFone{} for the fixed fused baseline, while reducing mean false alarms from \FixedFusedMatrixFalseAlarm{} to \AdaptiveSeqFalseAlarm{} alarms/min.
 The improvement is consistent across paired spoofing scenarios, with mean F1 gain \AdaptiveVsFixedFoneGain{} and bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}].
+Compared with the high-recall LiDAR--GNSS residual monitor, EA-SGLRT reduces false alarms by \AdaptiveVsLioFalseAlarmReductionPercent{}\%, forming a \AdaptiveParetoStatus{} operating point on the F1/false-alarm frontier.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -148,6 +149,7 @@ This design tests whether a detector separates adversarial consistency violation
 
 We compare EA-SGLRT with RAIM-only, robust RAIM with reference-residual evidence, EKF innovation gating, pseudorange GLRT-only, LiDAR--GNSS residual-only, fixed-threshold fused detection, fixed-threshold CUSUM fusion, adaptive non-sequential fused detection, and ablations that remove raw GNSS, LiDAR--GNSS, environment adaptation, or CUSUM.
 Metrics are computed per scenario and then averaged over the \MatrixAttackScenarioCount{} spoofing scenarios; false alarms/min are computed from the clean and degraded non-attack scenarios.
+Because a detector can trivially improve recall by alarming too often, we also report the Pareto frontier between mean attack F1 and mean false alarms/min across all baselines and ablations.
 For statistical comparison, each synthetic attack scenario is treated as a paired trial between EA-SGLRT and the fixed fused detector.
 EA-SGLRT improves F1 by \AdaptiveVsFixedFoneGain{} on average, with bootstrap 95\% confidence interval [\AdaptiveVsFixedCiLow{}, \AdaptiveVsFixedCiHigh{}] and sign-test $p=\AdaptiveVsFixedPvalue{}$.
 
@@ -177,6 +179,18 @@ EA-SGLRT & \AdaptiveSeqPrecision{} & \AdaptiveSeqRecall{} & \AdaptiveSeqFone{} &
     \includegraphics[width=\linewidth]{adaptive_baseline_comparison.png}
     \caption{Baseline comparison. EA-SGLRT improves attack F1 while reducing mean false alarms relative to the fixed fused detector.}
     \label{fig:baseline}
+\end{figure}
+
+Fig.~\ref{fig:pareto} shows why the false-alarm axis is necessary.
+The LiDAR--GNSS residual monitor has strong recall and the highest standalone F1, but it also generates \LioResidualFalseAlarm{} false alarms/min on clean/degraded non-attack data.
+EA-SGLRT intentionally selects a more conservative operating point: its F1 is \AdaptiveVsLioFoneDelta{} relative to LiDAR--GNSS-only, but it reduces mean false alarms by \AdaptiveVsLioFalseAlarmReductionPercent{}\% and remains \AdaptiveParetoStatus{} among the evaluated detectors.
+This trade-off is the relevant operating regime for field deployment, where persistent false alerts under benign urban degradation are not acceptable.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{false_alarm_pareto.png}
+    \caption{F1/false-alarm Pareto analysis across detectors and ablations. EA-SGLRT is marked with a star; non-dominated operating points form the frontier.}
+    \label{fig:pareto}
 \end{figure}
 
 \subsection{Attack Factor Study}
@@ -255,6 +269,7 @@ The current parameter sweep is a first robustness check; future work should tune
 \section{Conclusion}
 This paper converts the previous platform draft into a method-oriented detector: an environment-adaptive sequential GLRT that fuses raw GNSS and LiDAR--inertial consistency.
 The implementation is fully reproducible from the repository targets, generates a multi-scenario experiment matrix, and shows improved F1, lower degraded-environment false alarms, and stable parameter behavior compared with fixed-threshold fusion.
+The Pareto analysis further clarifies that the proposed detector is designed for the low-false-alarm operating regime rather than maximizing recall at any cost.
 The next research step is BeiDou-specific raw residual calibration, route-held-out validation, and real or replayed spoofing evaluation on longer degraded field sequences.
 
 \bibliographystyle{IEEEtran}

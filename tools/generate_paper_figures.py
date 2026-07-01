@@ -68,6 +68,7 @@ def load_inputs(args: argparse.Namespace):
     attack_strength_summary = pd.read_csv(require(adaptive_dir / "attack_strength_summary.csv"))
     attack_ramp_summary = pd.read_csv(require(adaptive_dir / "attack_ramp_summary.csv"))
     environment_summary = pd.read_csv(require(adaptive_dir / "environment_summary.csv"))
+    pareto_summary = pd.read_csv(require(adaptive_dir / "pareto_summary.csv"))
     sensitivity_summary = pd.read_csv(require(adaptive_dir / "sensitivity_summary.csv"))
     attack_classification_summary = pd.read_csv(require(adaptive_dir / "attack_classification_summary.csv"))
     adaptive_timeline = pd.read_csv(require(adaptive_dir / "adaptive_timeline.csv"))
@@ -86,6 +87,7 @@ def load_inputs(args: argparse.Namespace):
         attack_strength_summary,
         attack_ramp_summary,
         environment_summary,
+        pareto_summary,
         sensitivity_summary,
         attack_classification_summary,
         adaptive_timeline,
@@ -466,6 +468,98 @@ def plot_environment_false_alarm(environment_summary: pd.DataFrame, output_dir: 
     savefig(output_dir / "environment_false_alarm.png")
 
 
+def detector_label(value: str) -> str:
+    labels = {
+        "raim_only": "RAIM",
+        "robust_raim": "Robust RAIM",
+        "ekf_innovation": "EKF innov.",
+        "pseudorange_glrt_only": "PR GLRT",
+        "lio_residual_only": "LIO-GNSS",
+        "fixed_fused": "Fixed fused",
+        "fixed_cusum_fused": "Fixed CUSUM",
+        "adaptive_fused": "Adaptive fused",
+        "adaptive_seq_full": "EA-SGLRT",
+        "adaptive_seq_no_raw": "No raw",
+        "adaptive_seq_no_lio": "No LIO",
+        "adaptive_seq_no_env": "No env",
+        "adaptive_seq_no_cusum": "No CUSUM",
+    }
+    return labels.get(value, value)
+
+
+def plot_false_alarm_pareto(pareto_summary: pd.DataFrame, output_dir: Path) -> None:
+    if pareto_summary.empty:
+        return
+    data = pareto_summary.copy()
+    data["plot_fa"] = np.maximum(pd.to_numeric(data["mean_false_alarm_per_min"], errors="coerce").fillna(0.0), 1e-3)
+    data["attack_f1_mean"] = pd.to_numeric(data["attack_f1_mean"], errors="coerce").fillna(0.0)
+    front = data[data["is_pareto_front"] > 0].sort_values("plot_fa")
+    dominated = data[data["is_pareto_front"] <= 0]
+    fig, ax = plt.subplots(figsize=(8.6, 4.5))
+    if not dominated.empty:
+        ax.scatter(
+            dominated["plot_fa"],
+            dominated["attack_f1_mean"],
+            s=52,
+            color="#adb5bd",
+            edgecolor="#495057",
+            linewidth=0.5,
+            label="Dominated operating point",
+        )
+    if not front.empty:
+        ax.plot(front["plot_fa"], front["attack_f1_mean"], color="#2b8a3e", linewidth=1.2, alpha=0.8, label="Pareto front")
+        ax.scatter(
+            front["plot_fa"],
+            front["attack_f1_mean"],
+            s=68,
+            color="#2b8a3e",
+            edgecolor="#1b4332",
+            linewidth=0.7,
+            zorder=3,
+        )
+    primary = data[data["detector"] == "adaptive_seq_full"]
+    if not primary.empty:
+        ax.scatter(
+            primary["plot_fa"],
+            primary["attack_f1_mean"],
+            s=130,
+            marker="*",
+            color="#c92a2a",
+            edgecolor="#7f1d1d",
+            linewidth=0.7,
+            label="EA-SGLRT",
+            zorder=4,
+        )
+    for _, row in data.iterrows():
+        name = str(row["detector"])
+        if name not in {
+            "raim_only",
+            "robust_raim",
+            "pseudorange_glrt_only",
+            "lio_residual_only",
+            "fixed_fused",
+            "fixed_cusum_fused",
+            "adaptive_seq_full",
+            "adaptive_seq_no_env",
+        }:
+            continue
+        ax.annotate(
+            detector_label(name),
+            (float(row["plot_fa"]), float(row["attack_f1_mean"])),
+            xytext=(5, 4),
+            textcoords="offset points",
+            fontsize=7,
+        )
+    ax.set_xscale("log")
+    ax.set_xlabel("Mean false alarms/min (log scale)")
+    ax.set_ylabel("Mean attack F1")
+    ax.set_ylim(0, max(0.62, float(data["attack_f1_mean"].max()) * 1.18))
+    ax.set_title("Detection performance versus false-alarm operating point")
+    ax.legend(loc="lower right", fontsize=8)
+    ax.grid(True, which="both", alpha=0.25)
+    savefig(output_dir / "false_alarm_pareto.png")
+
+
 def plot_parameter_sensitivity(sensitivity_summary: pd.DataFrame, output_dir: Path) -> None:
     if sensitivity_summary.empty:
         return
@@ -547,6 +641,7 @@ def write_metrics_tex(
     scenario_summary: pd.DataFrame,
     attack_type_summary: pd.DataFrame,
     environment_summary: pd.DataFrame,
+    pareto_summary: pd.DataFrame,
     sensitivity_summary: pd.DataFrame,
     attack_classification_summary: pd.DataFrame,
     experiment_summary: dict,
@@ -557,6 +652,7 @@ def write_metrics_tex(
     raw_raim_detected = int((pd.to_numeric(attack.get("raw_raim_detected", pd.Series(dtype=float)), errors="coerce").fillna(0) > 0).sum())
     raw_reference_mean = float(pd.to_numeric(attack.get("raw_reference_residual_rms_m", pd.Series(dtype=float)), errors="coerce").fillna(0).mean())
     summary_by_detector = detector_summary.set_index("detector")
+    pareto_by_detector = pareto_summary.set_index("detector") if not pareto_summary.empty else pd.DataFrame()
     paired_stats = experiment_summary.get("paired_statistics", {})
     primary_attack_types = attack_type_summary[attack_type_summary["detector"] == "adaptive_seq_full"].copy()
     primary_attack_types = primary_attack_types.sort_values("f1_mean") if not primary_attack_types.empty else primary_attack_types
@@ -577,6 +673,14 @@ def write_metrics_tex(
         if detector not in summary_by_detector.index:
             return 0.0
         return float(summary_by_detector.loc[detector, column])
+
+    def pvalue(detector: str, column: str) -> float:
+        if pareto_by_detector.empty or detector not in pareto_by_detector.index:
+            return 0.0
+        value = pareto_by_detector.loc[detector, column]
+        if value == "" or pd.isna(value):
+            return 0.0
+        return float(value)
 
     def pretty_name(value: object) -> str:
         text = str(value).replace("_", " ")
@@ -619,6 +723,10 @@ def write_metrics_tex(
         macro("AdaptiveSeqCleanFalseAlarm", f"{dvalue('adaptive_seq_full', 'clean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveSeqFalseAlarm", f"{dvalue('adaptive_seq_full', 'mean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveSeqDegradedFalseAlarm", f"{dvalue('adaptive_seq_full', 'degraded_false_alarm_per_min'):.3f}"),
+        macro("ParetoFrontDetectorCount", f"{int((pd.to_numeric(pareto_summary.get('is_pareto_front', pd.Series(dtype=float)), errors='coerce').fillna(0) > 0).sum())}"),
+        macro("AdaptiveParetoStatus", "non-dominated" if pvalue("adaptive_seq_full", "is_pareto_front") > 0.5 else "dominated"),
+        macro("AdaptiveVsLioFalseAlarmReductionPercent", f"{pvalue('adaptive_seq_full', 'false_alarm_reduction_vs_lio_percent'):.1f}"),
+        macro("AdaptiveVsLioFoneDelta", f"{(dvalue('adaptive_seq_full', 'attack_f1_mean') - dvalue('lio_residual_only', 'attack_f1_mean')):.3f}"),
         macro("FixedFusedMatrixFone", f"{dvalue('fixed_fused', 'attack_f1_mean'):.3f}"),
         macro("FixedFusedPrecision", f"{dvalue('fixed_fused', 'attack_precision_mean'):.3f}"),
         macro("FixedFusedRecall", f"{dvalue('fixed_fused', 'attack_recall_mean'):.3f}"),
@@ -704,6 +812,7 @@ def main() -> int:
         attack_strength_summary,
         attack_ramp_summary,
         environment_summary,
+        pareto_summary,
         sensitivity_summary,
         attack_classification_summary,
         adaptive_timeline,
@@ -725,6 +834,7 @@ def main() -> int:
     plot_ablation_comparison(detector_summary, output_dir)
     plot_attack_type_breakdown(attack_type_summary, output_dir)
     plot_environment_false_alarm(environment_summary, output_dir)
+    plot_false_alarm_pareto(pareto_summary, output_dir)
     plot_parameter_sensitivity(sensitivity_summary, output_dir)
     plot_adaptive_cusum_timeline(adaptive_timeline, output_dir)
     write_metrics_tex(
@@ -737,6 +847,7 @@ def main() -> int:
         scenario_summary,
         attack_type_summary,
         environment_summary,
+        pareto_summary,
         sensitivity_summary,
         attack_classification_summary,
         experiment_summary,

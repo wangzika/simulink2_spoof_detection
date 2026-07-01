@@ -382,6 +382,56 @@ def environment_summary_rows(aggregate_rows: list[dict[str, object]]) -> list[di
     return rows
 
 
+def pareto_summary_rows(aggregate_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Compute the F1-vs-false-alarm operating frontier across detectors."""
+    if not aggregate_rows:
+        return []
+    by_name = {str(row["detector"]): row for row in aggregate_rows}
+    fixed = by_name.get("fixed_fused", {})
+    lio = by_name.get("lio_residual_only", {})
+    fixed_f1 = float(fixed.get("attack_f1_mean", 0.0) or 0.0)
+    lio_fa = float(lio.get("mean_false_alarm_per_min", 0.0) or 0.0)
+
+    rows: list[dict[str, object]] = []
+    for row in aggregate_rows:
+        detector_name = str(row["detector"])
+        f1 = float(row["attack_f1_mean"])
+        fa = float(row["mean_false_alarm_per_min"])
+        dominated_by: list[str] = []
+        for other in aggregate_rows:
+            other_name = str(other["detector"])
+            if other_name == detector_name:
+                continue
+            other_f1 = float(other["attack_f1_mean"])
+            other_fa = float(other["mean_false_alarm_per_min"])
+            if other_f1 >= f1 - 1e-12 and other_fa <= fa + 1e-12 and (other_f1 > f1 + 1e-12 or other_fa < fa - 1e-12):
+                dominated_by.append(other_name)
+        rows.append(
+            {
+                "detector": detector_name,
+                "attack_precision_mean": float(row["attack_precision_mean"]),
+                "attack_recall_mean": float(row["attack_recall_mean"]),
+                "attack_f1_mean": f1,
+                "mean_false_alarm_per_min": fa,
+                "clean_false_alarm_per_min": float(row["clean_false_alarm_per_min"]),
+                "degraded_false_alarm_per_min": float(row["degraded_false_alarm_per_min"]),
+                "is_pareto_front": 0 if dominated_by else 1,
+                "dominated_by": ";".join(sorted(dominated_by)),
+                "f1_delta_vs_fixed_fused": f1 - fixed_f1,
+                "false_alarm_reduction_vs_lio_percent": 100.0 * (1.0 - fa / lio_fa) if lio_fa > 1e-12 else "",
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            -int(item["is_pareto_front"]),
+            float(item["mean_false_alarm_per_min"]),
+            -float(item["attack_f1_mean"]),
+            str(item["detector"]),
+        )
+    )
+    return rows
+
+
 def sensitivity_rows(
     scenarios: list[tuple[dict[str, object], list[dict[str, str]]]],
     base_config: detector.DetectorConfig,
@@ -511,6 +561,7 @@ def write_markdown(
     paired_stats: dict[str, object],
     attack_type_rows: list[dict[str, object]],
     sensitivity: list[dict[str, object]],
+    pareto_rows: list[dict[str, object]],
 ) -> None:
     lines = [
         "# Adaptive Sequential GLRT Experiment Matrix",
@@ -538,6 +589,22 @@ def write_markdown(
             f"- Mean F1 difference: {float(paired_stats['mean_f1_difference']):.6f}",
             f"- Bootstrap 95% CI: [{float(paired_stats['ci95_low']):.6f}, {float(paired_stats['ci95_high']):.6f}]",
             f"- Sign-test p-value: {float(paired_stats['sign_test_p_value']):.6g}",
+            "",
+            "## F1/False-Alarm Pareto Front",
+            "",
+            "| Detector | Pareto front | Attack F1 | Mean FA/min | Dominated by |",
+            "| --- | ---: | ---: | ---: | --- |",
+        ]
+    )
+    for row in pareto_rows:
+        if int(row["is_pareto_front"]) != 1 and row["detector"] not in {"adaptive_seq_full", "fixed_fused", "lio_residual_only"}:
+            continue
+        lines.append(
+            f"| {row['detector']} | {int(row['is_pareto_front'])} | {float(row['attack_f1_mean']):.3f} | "
+            f"{float(row['mean_false_alarm_per_min']):.3f} | {row['dominated_by']} |"
+        )
+    lines.extend(
+        [
             "",
             "## Attack-Type Breakdown",
             "",
@@ -694,6 +761,7 @@ def main() -> int:
     strength_rows = grouped_metric_rows(matrix_rows, "strength_m", "strength_m")
     ramp_rows = grouped_metric_rows(matrix_rows, "ramp_s", "ramp_s")
     environment_rows = environment_summary_rows(aggregate_rows)
+    pareto_rows = pareto_summary_rows(aggregate_rows)
     sensitivity = sensitivity_rows(
         scenarios,
         config,
@@ -759,6 +827,19 @@ def main() -> int:
         "degraded_minus_clean_fa_per_min",
         "degraded_to_clean_ratio",
     ]
+    pareto_columns = [
+        "detector",
+        "attack_precision_mean",
+        "attack_recall_mean",
+        "attack_f1_mean",
+        "mean_false_alarm_per_min",
+        "clean_false_alarm_per_min",
+        "degraded_false_alarm_per_min",
+        "is_pareto_front",
+        "dominated_by",
+        "f1_delta_vs_fixed_fused",
+        "false_alarm_reduction_vs_lio_percent",
+    ]
     sensitivity_columns = [
         "adaptive_gain",
         "cusum_threshold",
@@ -791,6 +872,7 @@ def main() -> int:
     write_csv(output_dir / "attack_strength_summary.csv", strength_columns, strength_rows)
     write_csv(output_dir / "attack_ramp_summary.csv", ramp_columns, ramp_rows)
     write_csv(output_dir / "environment_summary.csv", environment_columns, environment_rows)
+    write_csv(output_dir / "pareto_summary.csv", pareto_columns, pareto_rows)
     write_csv(output_dir / "sensitivity_summary.csv", sensitivity_columns, sensitivity)
     write_csv(output_dir / "attack_classification_summary.csv", classification_columns, classification_rows)
     if default_timeline is None:
@@ -818,6 +900,7 @@ def main() -> int:
             "attack_strength_summary_csv": str(output_dir / "attack_strength_summary.csv"),
             "attack_ramp_summary_csv": str(output_dir / "attack_ramp_summary.csv"),
             "environment_summary_csv": str(output_dir / "environment_summary.csv"),
+            "pareto_summary_csv": str(output_dir / "pareto_summary.csv"),
             "sensitivity_summary_csv": str(output_dir / "sensitivity_summary.csv"),
             "attack_classification_summary_csv": str(output_dir / "attack_classification_summary.csv"),
             "adaptive_timeline_csv": str(output_dir / "adaptive_timeline.csv"),
@@ -825,7 +908,7 @@ def main() -> int:
     }
     write_json(output_dir / "experiment_summary.json", summary)
     write_json(output_dir / "statistical_tests.json", paired_stats)
-    write_markdown(output_dir / "experiment_summary.md", aggregate_rows, scenario_rows, paired_stats, attack_type_rows, sensitivity)
+    write_markdown(output_dir / "experiment_summary.md", aggregate_rows, scenario_rows, paired_stats, attack_type_rows, sensitivity, pareto_rows)
 
     print("Adaptive experiment matrix complete")
     print(f"  scenarios: {summary['scenarios']}")
