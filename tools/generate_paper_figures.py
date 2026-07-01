@@ -95,7 +95,7 @@ def load_inputs(args: argparse.Namespace):
     )
 
 
-def draw_box(ax, xy, text, width=2.25, height=0.75, color="#e8f1fb"):
+def draw_box(ax, xy, text, width=2.25, height=0.75, color="#e8f1fb", fontsize=9):
     x, y = xy
     patch = FancyBboxPatch(
         (x, y),
@@ -107,7 +107,7 @@ def draw_box(ax, xy, text, width=2.25, height=0.75, color="#e8f1fb"):
         facecolor=color,
     )
     ax.add_patch(patch)
-    ax.text(x + width / 2, y + height / 2, text, ha="center", va="center", fontsize=9)
+    ax.text(x + width / 2, y + height / 2, text, ha="center", va="center", fontsize=fontsize)
 
 
 def draw_arrow(ax, start, end):
@@ -155,6 +155,40 @@ def plot_architecture(output_dir: Path) -> None:
     ax.set_xlim(0, 8.4)
     ax.set_ylim(0.4, 4.25)
     savefig(output_dir / "system_architecture.png")
+
+
+def plot_method_flowchart(output_dir: Path) -> None:
+    fig, ax = plt.subplots(figsize=(10.6, 4.8))
+    ax.axis("off")
+    boxes = {
+        "raw": (0.15, 3.35, "Raw GNSS\nRAIM + ref.\nresiduals", "#d8f3dc"),
+        "receiver": (0.15, 2.25, "Receiver\nPR RMS/max\nRTK quality", "#fff3bf"),
+        "lio": (0.15, 1.15, "LiDAR--inertial\nGNSS residual\n+ Mahalanobis", "#ffe3e3"),
+        "env": (0.15, 0.05, "Environment\nC/N0, DOP,\nsat count", "#e7f5ff"),
+        "normalize": (2.35, 2.15, "Cue normalization\nS_L, S_P, S_R,\nS_D, S_Q", "#edf2ff"),
+        "quality": (2.35, 0.35, "Environment index\nE_t and raw\ncoverage gate", "#e7f5ff"),
+        "fuse": (4.55, 2.15, "Support-gated\nfused evidence\nq_t G_t", "#f3d9fa"),
+        "threshold": (4.55, 0.35, "Adaptive threshold\nτ_t = τ_0(1 + αE_t\n+ βI_raw missing)", "#f1f3f5"),
+        "ratio": (6.65, 1.25, "Likelihood-ratio\nsurrogate\nΛ_t = q_tG_t / τ_t", "#e5dbff"),
+        "cusum": (8.45, 1.25, "Sequential GLRT\nCUSUM update\nC_t", "#dee2ff"),
+        "decision": (8.45, 0.05, "Decision outputs\ndetection, confidence,\nanomaly type", "#d0ebff"),
+    }
+    for key, (x, y, text, color) in boxes.items():
+        draw_box(ax, (x, y), text, width=1.75, height=0.78, color=color, fontsize=7.7)
+    draw_arrow(ax, (1.9, 3.74), (2.35, 2.74))
+    draw_arrow(ax, (1.9, 2.64), (2.35, 2.54))
+    draw_arrow(ax, (1.9, 1.54), (2.35, 2.36))
+    draw_arrow(ax, (1.9, 0.44), (2.35, 0.74))
+    draw_arrow(ax, (4.1, 2.54), (4.55, 2.54))
+    draw_arrow(ax, (4.1, 0.74), (4.55, 0.74))
+    draw_arrow(ax, (6.3, 2.54), (6.65, 1.85))
+    draw_arrow(ax, (6.3, 0.74), (6.65, 1.43))
+    draw_arrow(ax, (8.4, 1.64), (8.45, 1.64))
+    draw_arrow(ax, (9.32, 1.25), (9.32, 0.83))
+    ax.text(9.46, 1.02, "C_t > h", fontsize=7.4, color="#2d4059")
+    ax.set_xlim(0, 10.4)
+    ax.set_ylim(-0.15, 4.45)
+    savefig(output_dir / "method_flowchart.png")
 
 
 def plot_trajectory_quality(attack: pd.DataFrame, output_dir: Path) -> None:
@@ -846,6 +880,7 @@ def main() -> int:
     _ = attack_ramp_summary
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_architecture(output_dir)
+    plot_method_flowchart(output_dir)
     plot_trajectory_quality(attack, output_dir)
     plot_spoof_score(attack, attack_metrics, output_dir)
     plot_raw_observation_summary(rinex_epoch, output_dir)

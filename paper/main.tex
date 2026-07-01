@@ -103,33 +103,107 @@ The raw residual layer contributes \RawRaimCoverageRows{} synchronized RAIM-capa
 \section{Method}
 Let $z_t$ denote the synchronized feature vector at epoch $t$.
 The null hypothesis $H_0$ contains nominal operation and benign environmental degradation; the alternative $H_1$ contains spoofing that creates persistent inconsistency among raw observations, receiver diagnostics, and LiDAR--inertial odometry.
-EA-SGLRT therefore separates two operations that are conflated by fixed thresholds: environment normalization and sequential evidence accumulation.
+The key design choice is to avoid treating all residual growth as adversarial.
+EA-SGLRT therefore decomposes detection into four steps: raw/cross-modal residual formation, environment normalization, support-gated evidence fusion, and sequential confirmation.
+Fig.~\ref{fig:methodflow} gives the algorithmic flow.
 
-The detector first computes normalized cue scores: LiDAR--GNSS residual score $S_L$, receiver pseudorange score $S_P$, raw GNSS score $S_R$, Doppler/TDCP score $S_D$ when present, and RTK-quality score $S_Q$.
-In implementation, $S_L$ is the maximum of Euclidean residual and Mahalanobis-gate ratios, $S_P$ is the maximum of pseudorange RMS and absolute-residual ratios, and $S_R$ is the maximum of the GPS RAIM chi-square ratio and the RTK-reference pseudorange RMS ratio.
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{method_flowchart.png}
+    \caption{EA-SGLRT method flow. Raw GNSS, receiver diagnostics, LiDAR--inertial consistency, and environment-quality features are normalized into cue scores. The environment index adapts the decision threshold, while support-gated evidence is accumulated by a sequential GLRT statistic before reporting detection, confidence, and anomaly type.}
+    \label{fig:methodflow}
+\end{figure}
+
+\subsection{Observation and Residual Model}
+For satellite $i$ at epoch $t$, the code observation can be written as
+\begin{equation}
+\rho_{t,i}= \lVert \mathbf{x}_t-\mathbf{s}_{t,i}\rVert
+ + c(\delta t_t-\delta t_{t,i}) + b_{\kappa(i)} + I_{t,i}+T_{t,i}
+ + \epsilon_{t,i}+a_{t,i},
+\end{equation}
+where $\mathbf{x}_t$ is receiver position, $\mathbf{s}_{t,i}$ is broadcast-ephemeris satellite position, $\delta t_t$ and $\delta t_{t,i}$ are receiver and satellite clock terms, $b_{\kappa(i)}$ is the inter-system clock state for constellation $\kappa(i)$, $I_{t,i}$ and $T_{t,i}$ are ionospheric and tropospheric delays, $\epsilon_{t,i}$ is nominal noise/multipath, and $a_{t,i}$ is a spoofing-induced bias.
+Given a weighted least-squares solution or an RTK reference position, the post-fit raw residual is
+\begin{equation}
+r^R_{t,i}=\rho_{t,i}-\hat{\rho}_{t,i}.
+\end{equation}
+The RAIM statistic is the weighted squared residual normalized by the chi-square threshold,
+\begin{equation}
+S_{\chi,t}=
+\frac{\sum_i w_{t,i}(r^R_{t,i})^2}
+{\chi^2_{1-P_{\mathrm{FA}}}(\nu_t)},
+\end{equation}
+where $\nu_t$ is the residual degree of freedom after estimating receiver position and clock states.
+In parallel, the detector forms an RTK-reference pseudorange RMS score from the same residual set.
+
+The cross-modal LiDAR--GNSS cue uses the position discrepancy
+\begin{equation}
+\mathbf{e}^L_t=\mathbf{p}^{\mathrm{GNSS}}_t-\mathbf{p}^{\mathrm{LIO}}_t,
+\end{equation}
+and its Mahalanobis counterpart when covariance or innovation-scale information is available.
+Receiver-side pseudorange diagnostics provide RMS and maximum residual statistics from the GNSS update log.
+Doppler and TDCP residuals are treated as additional rate-consistency cues when the RINEX observation stream contains the required fields.
+
+\subsection{Cue Normalization and Environment Index}
+Each heterogeneous residual is mapped to a dimensionless cue score using robust engineering scales:
+\begin{align}
+S_L &= \max\left(\frac{\lVert \mathbf{e}^L_t\rVert}{\sigma_L}, \frac{m^L_t}{m_0}\right),\\
+S_P &= \max\left(\frac{\mathrm{RMS}^P_t}{\sigma_P}, \frac{\max_i |r^P_{t,i}|}{\sigma_{P,\max}}\right),\\
+S_R &= \max\left(S_{\chi,t}, \frac{\mathrm{RMS}^R_t}{\sigma_R}\right),\\
+S_D &= \frac{\mathrm{RMS}^D_t}{\sigma_D}, \qquad
+S_Q = f(q^{\mathrm{RTK}}_t,\mathrm{ratio}_t).
+\end{align}
+Here $S_L$, $S_P$, $S_R$, $S_D$, and $S_Q$ correspond to LiDAR--GNSS consistency, receiver pseudorange diagnostics, raw GNSS residuals, Doppler/TDCP consistency, and RTK-quality degradation.
+
+The environment index $E_t\in[0,1]$ summarizes benign conditions that are known to increase residuals:
+\begin{equation}
+E_t =
+\sum_j \lambda_j \,\mathrm{clip}\left(\frac{u_{t,j}-u^{\mathrm{good}}_j}
+{u^{\mathrm{bad}}_j-u^{\mathrm{good}}_j},0,1\right),
+\end{equation}
+where $u_{t,j}$ includes low mean C/N0, low minimum C/N0, high DOP, low satellite count, low RTK ratio, non-fixed RTK status, low healthy-pseudorange count, and rejected pseudorange outliers.
+This term does not by itself create an alarm; it only changes the amount of evidence needed to reject $H_0$.
+
+\subsection{Support-Gated Fused Evidence}
 The instantaneous fused evidence is
 \begin{equation}
 G_t=w_L S_L+w_P S_P+w_R S_R+w_D S_D+w_Q S_Q .
 \end{equation}
+When raw observations are available, larger weights are assigned to $S_R$ and $S_P$; when raw coverage is missing, the fusion is deliberately conservative and cannot be driven by a single LiDAR--GNSS spike alone.
+The implementation also uses a weak support gate
+\begin{equation}
+\bar{G}_t = q_t G_t,\qquad q_t\in[0,1],
+\end{equation}
+where $q_t$ is high when at least two independent cues exceed weak evidence gates, reduced when only a strong LiDAR cue is accompanied by weak GNSS evidence, and zero when the evidence is isolated.
+This support gate is important for distinguishing urban-quality transients from coordinated spoofing, because degraded but non-attack epochs often excite only one residual family.
 
 The threshold is adapted with an environment degradation index $E_t$:
 \begin{equation}
 \tau_t=\tau_0\left(1+\alpha E_t+\beta I_{\mathrm{raw\ missing}}\right),
 \end{equation}
-where $E_t$ is a weighted combination of low C/N0, high DOP, low satellite count, low RTK ratio, poor RTK status, low healthy-pseudorange count, and rejected pseudorange outliers.
-The missing-raw term prevents LiDAR-only excursions from accumulating strong spoofing evidence when broadcast-ephemeris residuals are unavailable.
-This design makes the detector more conservative under $H_0$ degradation while still allowing persistent cross-cue evidence under $H_1$ to pass the threshold.
+where the missing-raw term prevents LiDAR-only excursions from accumulating strong spoofing evidence when broadcast-ephemeris residuals are unavailable.
+The normalized likelihood-ratio surrogate is
+\begin{equation}
+\Lambda_t=\frac{\bar{G}_t}{\tau_t}.
+\end{equation}
 
+\subsection{Sequential GLRT Decision}
 Sequential confirmation is performed with a CUSUM-style statistic:
 \begin{equation}
-C_t=\max\left(0,C_{t-1}+\max\left(0,\frac{G_t}{\tau_t}-\eta\right)-\gamma-\lambda E_t\right),
+C_t=\max\left(0,C_{t-1}+\max(0,\Lambda_t-\eta)-\gamma-\lambda E_t\right),
 \end{equation}
-and spoofing is declared when $C_t>h$.
-The detector also reports confidence
+where $\eta$ is the nominal-evidence offset, $\gamma$ is the CUSUM drift, and $\lambda E_t$ leaks evidence faster under benign degradation.
+Spoofing is declared when
+\begin{equation}
+d_t=\mathbf{1}(C_t>h \;\wedge\; q_t>0 \;\wedge\; \Lambda_t>\eta).
+\end{equation}
+This rule reduces single-epoch false alarms while keeping slow-ramp attacks detectable once weak evidence persists over time.
+
+The detector reports confidence
 \begin{equation}
 p_t=\sigma\left(k\left(\frac{C_t}{h}-0.72\right)\right),
 \end{equation}
-and assigns an explanatory anomaly type by the dominant cue: raw-observation outlier, pseudorange bias, LiDAR--GNSS inconsistency, coordinated spoofing, or benign degradation.
+and assigns an explanatory anomaly type using the dominant cue pattern.
+A high $S_R$ with weak cross-modal evidence is reported as a raw-observation outlier; dominant $S_P$ is reported as pseudorange bias; dominant $S_L$ is reported as LiDAR--GNSS inconsistency; simultaneous large $S_R$, $S_P$, and $S_L$ is reported as coordinated spoofing.
 This type is used for diagnosis rather than as a supervised semantic classifier.
 Fig.~\ref{fig:cusum} shows the resulting score, adaptive threshold, CUSUM, confidence, and degradation index for a representative attack.
 
