@@ -26,6 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clean-metrics", default="build/paper_platform/full_data_clean/full_data_clean_metrics.json")
     parser.add_argument("--rinex-summary", default="build/paper_platform/rinex_rover/full_data_rover_rinex_summary.json")
     parser.add_argument("--rinex-epoch", default="build/paper_platform/rinex_rover/full_data_rover_epoch_summary.csv")
+    parser.add_argument("--raw-clean-summary", default="build/paper_platform/raw_gnss_clean/full_data_raw_clean_raw_residual_summary.json")
+    parser.add_argument("--rtklib-pos", default="../full_data/gnss/rtklib_full.pos")
     parser.add_argument("--adaptive-dir", default="build/paper_platform/adaptive_experiments")
     parser.add_argument("--output-dir", default="paper/figures")
     parser.add_argument("--metrics-tex", default="paper/generated_metrics.tex")
@@ -60,6 +62,8 @@ def load_inputs(args: argparse.Namespace):
     attack_metrics = json.loads(require(resolve(args.attack_metrics)).read_text(encoding="utf-8"))
     clean_metrics = json.loads(require(resolve(args.clean_metrics)).read_text(encoding="utf-8"))
     rinex_summary = json.loads(require(resolve(args.rinex_summary)).read_text(encoding="utf-8"))
+    raw_clean_summary = json.loads(require(resolve(args.raw_clean_summary)).read_text(encoding="utf-8"))
+    rtklib_stats = summarize_rtklib_pos(require(resolve(args.rtklib_pos)))
     adaptive_dir = require(resolve(args.adaptive_dir))
     matrix = pd.read_csv(require(adaptive_dir / "matrix_results.csv"))
     detector_summary = pd.read_csv(require(adaptive_dir / "detector_summary.csv"))
@@ -80,6 +84,8 @@ def load_inputs(args: argparse.Namespace):
         attack_metrics,
         clean_metrics,
         rinex_summary,
+        raw_clean_summary,
+        rtklib_stats,
         matrix,
         detector_summary,
         scenario_summary,
@@ -93,6 +99,36 @@ def load_inputs(args: argparse.Namespace):
         adaptive_timeline,
         experiment_summary,
     )
+
+
+def summarize_rtklib_pos(path: Path) -> dict:
+    rows = 0
+    bad_rows = 0
+    first_stamp = ""
+    last_stamp = ""
+    quality_counts: dict[str, int] = {}
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("%"):
+                continue
+            parts = stripped.split()
+            rows += 1
+            if len(parts) < 14:
+                bad_rows += 1
+                continue
+            stamp = f"{parts[0]}/{parts[1]}"
+            if not first_stamp:
+                first_stamp = stamp
+            last_stamp = stamp
+            quality_counts[parts[5]] = quality_counts.get(parts[5], 0) + 1
+    return {
+        "rows": rows,
+        "bad_rows": bad_rows,
+        "first_stamp": first_stamp,
+        "last_stamp": last_stamp,
+        "quality_counts": quality_counts,
+    }
 
 
 def draw_box(ax, xy, text, width=2.25, height=0.75, color="#e8f1fb", fontsize=9):
@@ -128,7 +164,7 @@ def plot_architecture(output_dir: Path) -> None:
     ax.axis("off")
     boxes = {
         "rinex": (0.2, 3.2, "RINEX\nrover/base obs"),
-        "rtk": (0.2, 2.05, "RTKLIB\n.pos, DOP"),
+        "rtk": (0.2, 2.05, "Non-ROS RTKLIB\nfull .pos, DOP"),
         "fast": (0.2, 0.9, "FAST_GLIO\nloose/raw/tight logs"),
         "extract": (3.0, 3.2, "Raw observation\nfeature extraction"),
         "sync": (3.0, 1.75, "Time alignment\nGPST/Unix"),
@@ -859,6 +895,8 @@ def write_metrics_tex(
     attack_metrics: dict,
     clean_metrics: dict,
     rinex_summary: dict,
+    raw_clean_summary: dict,
+    rtklib_stats: dict,
     detector_summary: pd.DataFrame,
     scenario_summary: pd.DataFrame,
     attack_type_summary: pd.DataFrame,
@@ -891,11 +929,6 @@ def write_metrics_tex(
         else pd.DataFrame()
     )
     constrained_sensitivity = constrained_sensitivity_rows.iloc[0] if not constrained_sensitivity_rows.empty else selected_sensitivity
-    classification_fraction = (
-        float(pd.to_numeric(attack_classification_summary["dominant_predicted_fraction"], errors="coerce").fillna(0.0).mean())
-        if not attack_classification_summary.empty
-        else 0.0
-    )
 
     def dvalue(detector: str, column: str) -> float:
         if detector not in summary_by_detector.index:
@@ -923,6 +956,40 @@ def write_metrics_tex(
         except (TypeError, ValueError):
             return default
 
+    sensitivity_fa_limit = row_value(constrained_sensitivity, "operating_fa_limit", 0.0)
+    if sensitivity_fa_limit <= 0.0 and not sensitivity_summary.empty and "operating_fa_limit" in sensitivity_summary:
+        sensitivity_fa_limit = float(pd.to_numeric(sensitivity_summary["operating_fa_limit"], errors="coerce").fillna(0.0).max())
+    sensitivity_min_fa = (
+        float(pd.to_numeric(sensitivity_summary["mean_false_alarm_per_min"], errors="coerce").fillna(0.0).min())
+        if not sensitivity_summary.empty
+        else 0.0
+    )
+    sensitivity_rows_within_fa = (
+        int((pd.to_numeric(sensitivity_summary["mean_false_alarm_per_min"], errors="coerce").fillna(np.inf) <= sensitivity_fa_limit).sum())
+        if not sensitivity_summary.empty and sensitivity_fa_limit > 0.0
+        else 0
+    )
+    classification_fraction = (
+        float(pd.to_numeric(attack_classification_summary["dominant_predicted_fraction"], errors="coerce").fillna(0.0).mean())
+        if not attack_classification_summary.empty
+        else 0.0
+    )
+    raw_input_epochs = int(raw_clean_summary.get("epochs_with_input", 0))
+    raw_written_epochs = int(raw_clean_summary.get("epochs_written", 0))
+    raw_satellite_rows = int(raw_clean_summary.get("satellite_rows_written", 0))
+    raw_coverage_percent = 100.0 * raw_written_epochs / raw_input_epochs if raw_input_epochs else 0.0
+    system_names = {"G": "GPS", "E": "Galileo", "C": "BeiDou", "R": "GLONASS", "J": "QZSS", "I": "IRNSS"}
+    preferred_system_order = ["G", "E", "C", "R", "J", "I"]
+    available_systems = set(raw_clean_summary.get("systems", []))
+    ordered_systems = [system for system in preferred_system_order if system in available_systems]
+    ordered_systems.extend(system for system in raw_clean_summary.get("systems", []) if system not in set(ordered_systems))
+    raw_systems = "/".join(system_names.get(system, system) for system in ordered_systems)
+    broadcast_by_system = raw_clean_summary.get("broadcast_ephemeris_satellites_by_system", {})
+    records_by_system = raw_clean_summary.get("broadcast_ephemeris_records_by_system", {})
+    adaptive_fa_delta = dvalue("adaptive_seq_full", "mean_false_alarm_per_min") - dvalue("fixed_fused", "mean_false_alarm_per_min")
+    adaptive_clean_fa_delta = dvalue("adaptive_seq_full", "clean_false_alarm_per_min") - dvalue("fixed_fused", "clean_false_alarm_per_min")
+    adaptive_degraded_fa_delta = dvalue("adaptive_seq_full", "degraded_false_alarm_per_min") - dvalue("fixed_fused", "degraded_false_alarm_per_min")
+
     rows = [
         macro("RinexEpochCount", f"{int(rinex_summary['epochs'])}"),
         macro("RinexSatelliteRowCount", f"{int(rinex_summary['satellite_rows'])}"),
@@ -939,6 +1006,22 @@ def write_metrics_tex(
         macro("BestFoneScore", f"{float(best_f1.get('f1', 0.0)):.3f}"),
         macro("CleanFalseAlarmPerMinute", f"{clean_metrics['false_alarm_per_min']:.3f}"),
         macro("RinexMeanSatellites", f"{float(rinex_summary['satellite_count']['mean']):.2f}"),
+        macro("RtklibSolutionRows", f"{int(rtklib_stats.get('rows', 0))}"),
+        macro("RtklibBadRows", f"{int(rtklib_stats.get('bad_rows', 0))}"),
+        macro("RtklibStartStamp", str(rtklib_stats.get("first_stamp", ""))),
+        macro("RtklibEndStamp", str(rtklib_stats.get("last_stamp", ""))),
+        macro("RawResidualInputEpochs", f"{raw_input_epochs}"),
+        macro("RawResidualWrittenEpochs", f"{raw_written_epochs}"),
+        macro("RawResidualSatelliteRows", f"{raw_satellite_rows}"),
+        macro("RawResidualCoveragePercent", f"{raw_coverage_percent:.1f}"),
+        macro("RawResidualSystems", raw_systems or "n/a"),
+        macro("BroadcastEphemerisSatellites", f"{int(raw_clean_summary.get('broadcast_ephemeris_satellites', 0))}"),
+        macro("BroadcastGpsSatellites", f"{int(broadcast_by_system.get('G', 0))}"),
+        macro("BroadcastGalileoSatellites", f"{int(broadcast_by_system.get('E', 0))}"),
+        macro("BroadcastBeiDouSatellites", f"{int(broadcast_by_system.get('C', 0))}"),
+        macro("BroadcastGpsRecords", f"{int(records_by_system.get('G', 0))}"),
+        macro("BroadcastGalileoRecords", f"{int(records_by_system.get('E', 0))}"),
+        macro("BroadcastBeiDouRecords", f"{int(records_by_system.get('C', 0))}"),
         macro("RawRaimCoverageRows", f"{raw_raim_coverage}"),
         macro("RawRaimDetectedRows", f"{raw_raim_detected}"),
         macro("RawReferenceResidualMean", f"{raw_reference_mean:.3f}"),
@@ -961,6 +1044,9 @@ def write_metrics_tex(
         macro("FixedFusedCleanFalseAlarm", f"{dvalue('fixed_fused', 'clean_false_alarm_per_min'):.3f}"),
         macro("FixedFusedDegradedFalseAlarm", f"{dvalue('fixed_fused', 'degraded_false_alarm_per_min'):.3f}"),
         macro("FixedFusedMatrixFalseAlarm", f"{dvalue('fixed_fused', 'mean_false_alarm_per_min'):.3f}"),
+        macro("AdaptiveVsFixedFalseAlarmDelta", f"{adaptive_fa_delta:.3f}"),
+        macro("AdaptiveVsFixedCleanFalseAlarmDelta", f"{adaptive_clean_fa_delta:.3f}"),
+        macro("AdaptiveVsFixedDegradedFalseAlarmDelta", f"{adaptive_degraded_fa_delta:.3f}"),
         macro("PseudorangeGlrtFone", f"{dvalue('pseudorange_glrt_only', 'attack_f1_mean'):.3f}"),
         macro("PseudorangeGlrtPrecision", f"{dvalue('pseudorange_glrt_only', 'attack_precision_mean'):.3f}"),
         macro("PseudorangeGlrtRecall", f"{dvalue('pseudorange_glrt_only', 'attack_recall_mean'):.3f}"),
@@ -1003,7 +1089,9 @@ def write_metrics_tex(
         macro("SensitivityBestCusum", f"{row_value(best_sensitivity, 'cusum_threshold'):.2f}"),
         macro("SensitivitySelectedFone", f"{row_value(selected_sensitivity, 'attack_f1_mean'):.3f}"),
         macro("SensitivitySelectedFalseAlarm", f"{row_value(selected_sensitivity, 'mean_false_alarm_per_min'):.3f}"),
-        macro("SensitivityFaLimit", f"{row_value(constrained_sensitivity, 'operating_fa_limit', 0.0):.3f}"),
+        macro("SensitivityFaLimit", f"{sensitivity_fa_limit:.3f}"),
+        macro("SensitivityMinimumFalseAlarm", f"{sensitivity_min_fa:.3f}"),
+        macro("SensitivityRowsWithinFaLimit", f"{sensitivity_rows_within_fa}"),
         macro("SensitivityConstrainedFone", f"{row_value(constrained_sensitivity, 'attack_f1_mean'):.3f}"),
         macro("SensitivityConstrainedGain", f"{row_value(constrained_sensitivity, 'adaptive_gain'):.2f}"),
         macro("SensitivityConstrainedCusum", f"{row_value(constrained_sensitivity, 'cusum_threshold'):.2f}"),
@@ -1038,6 +1126,8 @@ def main() -> int:
         attack_metrics,
         clean_metrics,
         rinex_summary,
+        raw_clean_summary,
+        rtklib_stats,
         matrix,
         detector_summary,
         scenario_summary,
@@ -1078,6 +1168,8 @@ def main() -> int:
         attack_metrics,
         clean_metrics,
         rinex_summary,
+        raw_clean_summary,
+        rtklib_stats,
         detector_summary,
         scenario_summary,
         attack_type_summary,
