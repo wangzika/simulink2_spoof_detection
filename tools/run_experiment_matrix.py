@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-threshold", type=float, default=1.0)
     parser.add_argument("--sensitivity-gains", default="0,0.75,1.35,2.0")
     parser.add_argument("--sensitivity-cusum-thresholds", default="0.35,0.5,0.75,1.0")
+    parser.add_argument("--operating-fa-limit", type=float, default=6.0, help="False-alarm/min budget used to select the reported operating point from the sensitivity grid.")
     return parser.parse_args()
 
 
@@ -485,6 +486,26 @@ def sensitivity_rows(
     return rows
 
 
+def mark_false_alarm_constrained_selection(rows: list[dict[str, object]], fa_limit: float) -> dict[str, object]:
+    if not rows:
+        return {}
+    feasible = [row for row in rows if float(row["mean_false_alarm_per_min"]) <= fa_limit]
+    candidates = feasible if feasible else rows
+    best = max(
+        candidates,
+        key=lambda row: (
+            float(row["attack_f1_mean"]),
+            float(row["attack_precision_mean"]),
+            -float(row["mean_false_alarm_per_min"]),
+            -float(row["attack_latency_mean_s"] or 0.0),
+        ),
+    )
+    for row in rows:
+        row["operating_fa_limit"] = fa_limit
+        row["is_constrained_best"] = int(row is best)
+    return best
+
+
 def attack_classification_summary(
     adaptive_outputs: list[tuple[dict[str, object], detector.DetectorOutput]]
 ) -> list[dict[str, object]]:
@@ -622,6 +643,7 @@ def write_markdown(
     if sensitivity:
         best = sensitivity[0]
         selected = next((row for row in sensitivity if int(row["is_selected_config"]) == 1), best)
+        constrained = next((row for row in sensitivity if int(row.get("is_constrained_best", 0)) == 1), selected)
         lines.extend(
             [
                 "",
@@ -629,6 +651,9 @@ def write_markdown(
                 "",
                 f"- Best grid F1: {float(best['attack_f1_mean']):.3f} at adaptive_gain={float(best['adaptive_gain']):.2f}, cusum_threshold={float(best['cusum_threshold']):.2f}.",
                 f"- Selected config F1: {float(selected['attack_f1_mean']):.3f}, mean FA/min={float(selected['mean_false_alarm_per_min']):.3f}.",
+                f"- False-alarm-constrained best (FA/min <= {float(constrained['operating_fa_limit']):.3f}): "
+                f"F1={float(constrained['attack_f1_mean']):.3f}, adaptive_gain={float(constrained['adaptive_gain']):.2f}, "
+                f"cusum_threshold={float(constrained['cusum_threshold']):.2f}, mean FA/min={float(constrained['mean_false_alarm_per_min']):.3f}.",
             ]
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -768,6 +793,7 @@ def main() -> int:
         parse_list_float(args.sensitivity_gains),
         parse_list_float(args.sensitivity_cusum_thresholds),
     )
+    constrained_selection = mark_false_alarm_constrained_selection(sensitivity, args.operating_fa_limit)
     classification_rows = attack_classification_summary(adaptive_outputs)
 
     matrix_columns = [
@@ -850,7 +876,9 @@ def main() -> int:
         "clean_false_alarm_per_min",
         "degraded_false_alarm_per_min",
         "mean_false_alarm_per_min",
+        "operating_fa_limit",
         "is_selected_config",
+        "is_constrained_best",
     ]
     classification_columns = [
         "true_attack_type",
@@ -891,6 +919,8 @@ def main() -> int:
         "detectors": detectors,
         "best_detector": aggregate_rows[0] if aggregate_rows else {},
         "paired_statistics": paired_stats,
+        "false_alarm_constrained_selection": constrained_selection,
+        "operating_fa_limit": args.operating_fa_limit,
         "config": config.__dict__,
         "outputs": {
             "matrix_results_csv": str(output_dir / "matrix_results.csv"),

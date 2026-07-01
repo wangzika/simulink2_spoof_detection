@@ -568,6 +568,11 @@ def plot_parameter_sensitivity(sensitivity_summary: pd.DataFrame, output_dir: Pa
     f1 = f1.sort_index().sort_index(axis=1)
     fa = fa.reindex(index=f1.index, columns=f1.columns)
     selected = sensitivity_summary[sensitivity_summary["is_selected_config"] > 0]
+    constrained = (
+        sensitivity_summary[sensitivity_summary["is_constrained_best"] > 0]
+        if "is_constrained_best" in sensitivity_summary.columns
+        else pd.DataFrame()
+    )
     fig, axes = plt.subplots(1, 2, figsize=(9.2, 3.9), sharey=True)
     for ax, pivot, title, cmap, vmin, vmax in [
         (axes[0], f1, "Attack F1", "viridis", 0.0, 1.0),
@@ -591,6 +596,13 @@ def plot_parameter_sensitivity(sensitivity_summary: pd.DataFrame, output_dir: Pa
                 row_idx = list(pivot.index).index(gain)
                 col_idx = list(pivot.columns).index(threshold)
                 ax.add_patch(Rectangle((col_idx - 0.5, row_idx - 0.5), 1, 1, fill=False, edgecolor="#ffffff", linewidth=2.0))
+        if not constrained.empty:
+            gain = float(constrained.iloc[0]["adaptive_gain"])
+            threshold = float(constrained.iloc[0]["cusum_threshold"])
+            if gain in set(pivot.index) and threshold in set(pivot.columns):
+                row_idx = list(pivot.index).index(gain)
+                col_idx = list(pivot.columns).index(threshold)
+                ax.add_patch(Rectangle((col_idx - 0.44, row_idx - 0.44), 0.88, 0.88, fill=False, edgecolor="#ffd43b", linewidth=1.5))
         cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.ax.tick_params(labelsize=7)
     axes[0].set_ylabel("Adaptive gain")
@@ -663,6 +675,12 @@ def write_metrics_tex(
     best_sensitivity = sensitivity.iloc[0] if not sensitivity.empty else None
     selected_sensitivity_rows = sensitivity_summary[sensitivity_summary["is_selected_config"] > 0]
     selected_sensitivity = selected_sensitivity_rows.iloc[0] if not selected_sensitivity_rows.empty else best_sensitivity
+    constrained_sensitivity_rows = (
+        sensitivity_summary[sensitivity_summary["is_constrained_best"] > 0]
+        if "is_constrained_best" in sensitivity_summary.columns
+        else pd.DataFrame()
+    )
+    constrained_sensitivity = constrained_sensitivity_rows.iloc[0] if not constrained_sensitivity_rows.empty else selected_sensitivity
     classification_fraction = (
         float(pd.to_numeric(attack_classification_summary["dominant_predicted_fraction"], errors="coerce").fillna(0.0).mean())
         if not attack_classification_summary.empty
@@ -775,6 +793,11 @@ def write_metrics_tex(
         macro("SensitivityBestCusum", f"{row_value(best_sensitivity, 'cusum_threshold'):.2f}"),
         macro("SensitivitySelectedFone", f"{row_value(selected_sensitivity, 'attack_f1_mean'):.3f}"),
         macro("SensitivitySelectedFalseAlarm", f"{row_value(selected_sensitivity, 'mean_false_alarm_per_min'):.3f}"),
+        macro("SensitivityFaLimit", f"{row_value(constrained_sensitivity, 'operating_fa_limit', 0.0):.3f}"),
+        macro("SensitivityConstrainedFone", f"{row_value(constrained_sensitivity, 'attack_f1_mean'):.3f}"),
+        macro("SensitivityConstrainedGain", f"{row_value(constrained_sensitivity, 'adaptive_gain'):.2f}"),
+        macro("SensitivityConstrainedCusum", f"{row_value(constrained_sensitivity, 'cusum_threshold'):.2f}"),
+        macro("SensitivityConstrainedFalseAlarm", f"{row_value(constrained_sensitivity, 'mean_false_alarm_per_min'):.3f}"),
         macro("AdaptiveVsFixedFoneGain", f"{float(paired_stats.get('mean_f1_difference', 0.0)):.3f}"),
         macro("AdaptiveVsFixedCiLow", f"{float(paired_stats.get('ci95_low', 0.0)):.3f}"),
         macro("AdaptiveVsFixedCiHigh", f"{float(paired_stats.get('ci95_high', 0.0)):.3f}"),

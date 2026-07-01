@@ -238,12 +238,14 @@ Removing raw GNSS drops F1 to \NoRawFone{}, removing LiDAR--GNSS consistency dro
 \subsection{Parameter Sensitivity}
 Fig.~\ref{fig:sensitivity} sweeps the adaptive gain and CUSUM threshold.
 The best grid point reaches F1 \SensitivityBestFone{} at gain \SensitivityBestGain{} and threshold \SensitivityBestCusum{}, but this more aggressive operating point increases false alarms.
-The selected setting keeps F1 \SensitivitySelectedFone{} while reducing mean false alarms to \SensitivitySelectedFalseAlarm{} alarms/min, which better matches the target of lowering false positives under degraded but non-attack operation.
+We therefore select the operating point by maximizing F1 subject to a mean false-alarm budget of \SensitivityFaLimit{} alarms/min on the clean/degraded non-attack scenarios.
+This constrained rule selects adaptive gain \SensitivityConstrainedGain{} and CUSUM threshold \SensitivityConstrainedCusum{}, with F1 \SensitivityConstrainedFone{} and mean false alarms \SensitivityConstrainedFalseAlarm{} alarms/min.
+The selected setting keeps the detector in the low-false-alarm regime, which better matches the target of lowering false positives under degraded but non-attack operation.
 
 \begin{figure}[!t]
     \centering
     \includegraphics[width=\linewidth]{parameter_sensitivity.png}
-    \caption{Parameter sensitivity of EA-SGLRT. The outlined cell is the selected operating point used in the main experiments.}
+    \caption{Parameter sensitivity of EA-SGLRT. The white outline is the configured point used in the main experiments; the yellow outline marks the best point under the false-alarm budget.}
     \label{fig:sensitivity}
 \end{figure}
 
